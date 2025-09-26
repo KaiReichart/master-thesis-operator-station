@@ -1,0 +1,11 @@
+data/data_analysis.db filter=lfs diff=lfs merge=lfs -text
+data/flights.db filter=lfs diff=lfs merge=lfs -text
+temp_uploads/uploaded_20250603_101441_Flight[[:space:]]Baseline[[:space:]]2.sdlog filter=lfs diff=lfs merge=lfs -text
+results/hoefle/hoefle_gps.sdlog filter=lfs diff=lfs merge=lfs -text
+results/hoefle/hoefle_motor.sdlog filter=lfs diff=lfs merge=lfs -text
+results/markus/markus_2.sdlog filter=lfs diff=lfs merge=lfs -text
+results/michimiller/miller_2.sdlog filter=lfs diff=lfs merge=lfs -text
+temp_uploads/uploaded_20250603_095605_Flight[[:space:]]Baseline[[:space:]]2.sdlog filter=lfs diff=lfs merge=lfs -text
+results/hoefle/hoefle_tp.sdlog filter=lfs diff=lfs merge=lfs -text
+results/markus/markus_1.sdlog filter=lfs diff=lfs merge=lfs -text
+results/michimiller/miller_1.sdlog filter=lfs diff=lfs merge=lfs -text

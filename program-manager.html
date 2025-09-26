@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#3b82f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="OpStation">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+    <title>Program Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Initialize wake lock
+        let wakeLock = null;
+
+        async function enableWakeLock() {
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                console.log('Wake Lock is active');
+            } catch (err) {
+                console.error('Wake Lock error:', err);
+            }
+        }
+
+        // Get available programs based on OS
+        async function getAvailablePrograms() {
+            const response = await fetch('/programs');
+            if (response.ok) {
+                return await response.json();
+            }
+            return [];
+        }
+
+        let programs = [];
+        let updateInterval;
+
+        async function getStatus(name) {
+            try {
+                const response = await fetch(`/status?name=${name}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    return { name, running: data.running, canKill: data.canKill };
+                }
+                return { name, running: false, error: true, canKill: false };
+            } catch (error) {
+                return { name, running: false, error: true, canKill: false };
+            }
+        }
+
+        async function updateStatuses() {
+            const statusContainer = document.getElementById('status-container');
+            const statuses = await Promise.all(programs.map(getStatus));
+            
+            // Sort programs by name to maintain consistent order
+            statuses.sort((a, b) => a.name.localeCompare(b.name));
+            
+            statusContainer.innerHTML = statuses.map(status => `
+                <div class="flex items-center justify-between p-4 bg-white rounded-lg shadow mb-4">
+                    <div class="flex items-center">
+                        <div class="w-3 h-3 rounded-full ${status.running ? 'bg-green-500' : status.error ? 'bg-red-500' : 'bg-gray-500'} mr-3"></div>
+                        <span class="text-lg font-medium">${status.name}</span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="launchProgram('${status.name}')" 
+                                class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors ${status.running ? 'opacity-50 cursor-not-allowed' : ''}">
+                            Launch
+                        </button>
+                        ${status.canKill ? `
+                            <button onclick="killProgram('${status.name}')"
+                                    class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors ${!status.running ? 'opacity-50 cursor-not-allowed' : ''}">
+                                Kill
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function launchProgram(name) {
+            try {
+                const response = await fetch(`/launch?name=${name}`, { method: 'POST' });
+                if (!response.ok) throw new Error('Failed to launch');
+                updateStatuses();
+                updateEvents();
+            } catch (error) {
+                showNotification(`Failed to launch ${name}`, true);
+            }
+        }
+
+        async function killProgram(name) {
+            try {
+                const response = await fetch(`/kill?name=${name}`, { method: 'POST' });
+                if (!response.ok) throw new Error('Failed to kill');
+                updateStatuses();
+                updateEvents();
+            } catch (error) {
+                showNotification(`Failed to kill ${name}`, true);
+            }
+        }
+
+        async function recordManualEvent(type, program) {
+            try {
+                const response = await fetch('/manual-event', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        type: type,
+                        program: program
+                    })
+                });
+                if (!response.ok) throw new Error('Failed to record event');
+                updateEvents();
+            } catch (error) {
+                showNotification(`Failed to record event: ${error.message}`, true);
+            }
+        }
+
+        async function updateEvents() {
+            try {
+                const response = await fetch('/events');
+                if (!response.ok) throw new Error('Failed to fetch events');
+                const events = await response.json();
+                
+                const eventsTable = document.getElementById('events-table-body');
+                // Reverse the events array to show newest first
+                eventsTable.innerHTML = [...events].reverse().map(event => `
+                    <tr class="border-b">
+                        <td class="px-4 py-2">${new Date(event.timestamp).toLocaleTimeString()}</td>
+                        <td class="px-4 py-2">${event.program}</td>
+                        <td class="px-4 py-2">
+                            <span class="px-2 py-1 rounded ${
+                                event.type === 'launch' ? 'bg-green-100 text-green-800' :
+                                event.type === 'kill' ? 'bg-red-100 text-red-800' :
+                                event.type === 'flight_started' ? 'bg-green-100 text-green-800' :
+                                event.type === 'flight_ended' ? 'bg-red-100 text-red-800' :
+                                event.type === 'failure_started' ? 'bg-orange-100 text-orange-800' :
+                                event.type === 'failure_recognised' ? 'bg-purple-100 text-purple-800' :
+                                event.type === 'confused' ? 'bg-yellow-100 text-yellow-800' :
+                                event.type === 'preparations_started' ? 'bg-indigo-100 text-indigo-800' :
+                                event.type === 'preparations_finished' ? 'bg-indigo-100 text-indigo-800' :
+                                'bg-blue-100 text-blue-800'
+                            }">
+                                ${event.type.replace(/_/g, ' ')}
+                            </span>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to update events:', error);
+            }
+        }
+
+        function showNotification(message, isError = false) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `fixed top-4 right-4 px-6 py-3 rounded shadow-lg ${isError ? 'bg-red-500' : 'bg-green-500'} text-white`;
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+
+        // GPS WebSocket connection
+        let gpsWs = null;
+        let currentPosition = null;
+        let targetPosition = null;
+
+        function connectGPSWebSocket() {
+            gpsWs = new WebSocket(`ws://${window.location.host}/gps-ws`);
+            
+            gpsWs.onmessage = function(event) {
+                const position = JSON.parse(event.data);
+                currentPosition = position;
+                updateGPSDisplay();
+                checkDistanceToTarget();
+            };
+
+            gpsWs.onclose = function() {
+                setTimeout(connectGPSWebSocket, 1000); // Reconnect after 1 second
+            };
+        }
+
+        function degreesToDMS(decimalDegrees, isLatitude) {
+            const absolute = Math.abs(decimalDegrees);
+            const degrees = Math.floor(absolute);
+            const minutesNotTruncated = (absolute - degrees) * 60;
+            const minutes = Math.floor(minutesNotTruncated);
+            const seconds = ((minutesNotTruncated - minutes) * 60).toFixed(2);
+
+            const direction = isLatitude
+                ? (decimalDegrees >= 0 ? 'N' : 'S')
+                : (decimalDegrees >= 0 ? 'E' : 'W');
+
+            return `${degrees}°${minutes}'${seconds}"${direction}`;
+        }
+
+        function updateGPSDisplay() {
+            if (!currentPosition) return;
+            
+            const gpsDisplay = document.getElementById('gps-display');
+            gpsDisplay.innerHTML = `
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <span class="text-sm text-gray-600">Latitude:</span>
+                        <span class="font-mono">${degreesToDMS(currentPosition.latitude, true)}</span>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-600">Longitude:</span>
+                        <span class="font-mono">${degreesToDMS(currentPosition.longitude, false)}</span>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-600">Altitude:</span>
+                        <span class="font-mono">${currentPosition.altitude.toFixed(1)}m</span>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-600">Last Update:</span>
+                        <span class="font-mono">${new Date(currentPosition.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // Earth's radius in meters
+            const φ1 = lat1 * Math.PI/180;
+            const φ2 = lat2 * Math.PI/180;
+            const Δφ = (lat2-lat1) * Math.PI/180;
+            const Δλ = (lon2-lon1) * Math.PI/180;
+
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                    Math.cos(φ1) * Math.cos(φ2) *
+                    Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+            return R * c; // Distance in meters
+        }
+
+        function checkDistanceToTarget() {
+            if (!currentPosition || !targetPosition) return;
+
+            const distance = calculateDistance(
+                currentPosition.latitude,
+                currentPosition.longitude,
+                targetPosition.lat,
+                targetPosition.lon
+            );
+
+            const distanceDisplay = document.getElementById('distance-display');
+            distanceDisplay.textContent = `Distance to target: ${distance.toFixed(1)}m`;
+
+            if (distance <= targetPosition.distance) {
+                // Trigger action when within target distance
+                recordManualEvent('reached_target', 'GPS');
+                showNotification('Reached target location!', false);
+            }
+        }
+
+        // Remove broadcasting related functions
+        let isSendingToTarget = false;
+        let distanceThreshold = 10.0; // Default value in nautical miles
+        let currentTargetIP = "";
+
+        async function fetchCurrentTargetIP() {
+            try {
+                const response = await fetch('/get-target-ip');
+                if (!response.ok) throw new Error('Failed to fetch target IP');
+                const data = await response.json();
+                currentTargetIP = data.ip;
+                updateTargetIPDisplay();
+            } catch (error) {
+                console.error('Failed to fetch target IP:', error);
+            }
+        }
+
+        function updateTargetIPDisplay() {
+            const ipInput = document.getElementById('targetIP');
+            ipInput.value = currentTargetIP;
+            const ipDisplay = document.getElementById('current-ip-display');
+            ipDisplay.textContent = currentTargetIP ? `Current Target IP: ${currentTargetIP}` : 'No target IP configured';
+        }
+
+        async function toggleSendingToTarget() {
+            try {
+                const response = await fetch('/broadcast-toggle', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        enabled: !isSendingToTarget
+                    })
+                });
+                if (!response.ok) throw new Error('Failed to toggle sending to target');
+                isSendingToTarget = !isSendingToTarget;
+                updateSendButton();
+                updateEvents();
+            } catch (error) {
+                showNotification(`Failed to toggle sending to target: ${error.message}`, true);
+            }
+        }
+
+        function updateSendButton() {
+            const button = document.getElementById('broadcast-toggle');
+            button.className = `w-full px-4 py-2 text-white rounded transition-colors ${
+                isSendingToTarget 
+                    ? 'bg-green-500 hover:bg-green-600' 
+                    : 'bg-red-500 hover:bg-red-600'
+            }`;
+            button.textContent = isSendingToTarget ? 'Sending to Target IP' : 'Not Sending to Target IP';
+        }
+
+        function updateDistanceThreshold() {
+            const input = document.getElementById('distance-threshold');
+            const value = parseFloat(input.value);
+            if (!isNaN(value) && value > 0) {
+                distanceThreshold = value;
+                // Update the backend with the new threshold
+                fetch('/set-distance-threshold', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ threshold: value })
+                })
+                .then(response => {
+                    if (!response.ok) throw new Error('Failed to update distance threshold');
+                    showNotification('Distance threshold updated successfully');
+                })
+                .catch(error => {
+                    showNotification(`Failed to update distance threshold: ${error.message}`, true);
+                });
+            }
+        }
+
+        // Start automatic updates when the page loads
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Enable wake lock when the page loads
+            await enableWakeLock();
+
+            programs = await getAvailablePrograms();
+            updateStatuses();
+            updateEvents();
+            updateInterval = setInterval(updateStatuses, 1000);
+            setInterval(updateEvents, 1000);
+            connectGPSWebSocket();
+            updateSendButton();
+            await fetchCurrentTargetIP();
+
+            // Add event listener for distance threshold changes
+            const distanceThresholdInput = document.getElementById('distance-threshold');
+            distanceThresholdInput.addEventListener('change', updateDistanceThreshold);
+        });
+
+        // Handle visibility change
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+                await enableWakeLock();
+            }
+        });
+
+        function setTargetIP() {
+            const ipInput = document.getElementById('targetIP');
+            const ip = ipInput.value.trim();
+            
+            // Basic IP validation
+            const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+            if (!ipPattern.test(ip)) {
+                showNotification('Please enter a valid IP address', true);
+                return;
+            }
+
+            fetch('/set-target-ip', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ ip: ip })
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Failed to set target IP');
+                currentTargetIP = ip;
+                updateTargetIPDisplay();
+                showNotification('Target IP set successfully');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showNotification('Failed to set target IP', true);
+            });
+        }
+    </script>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex items-center justify-between mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">Program Manager</h1>
+            <div class="flex space-x-4">
+                <button id="broadcast-toggle" onclick="toggleSendingToTarget()"
+                        class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+                    Not Sending to Target IP
+                </button>
+                <button onclick="updateStatuses()" 
+                        class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors">
+                    Refresh Now
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Programs Section -->
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Programs</h2>
+                <div id="status-container" class="space-y-4">
+                    <!-- Status items will be inserted here -->
+                </div>
+
+                <!-- GPS Section -->
+                <div class="mt-8">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">GPS Position</h2>
+                    <div id="gps-display" class="bg-white rounded-lg shadow p-4">
+                        <div class="text-gray-500">Waiting for GPS data...</div>
+                    </div>
+
+                    <!-- Target Position Section -->
+                    <div class="mt-4">
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">Target Position</h3>
+                        <div class="bg-white rounded-lg shadow p-4">
+                            <div class="mb-4">
+                                <p class="text-sm text-gray-600 mb-2">Center: Currock Hill (54.9275°N, 1.8342°W)</p>
+                            </div>
+                            
+                            <!-- GPS Sending Configuration -->
+                            <div class="mb-4 p-3 bg-gray-50 rounded-lg">
+                                <h4 class="text-sm font-medium text-gray-700 mb-2">GPS Sending Configuration</h4>
+                                <div class="grid grid-cols-1 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700">Target IP Address</label>
+                                        <div class="mt-1 flex gap-2">
+                                            <input type="text" id="targetIP" placeholder="Enter target IP address" 
+                                                   pattern="^(\d{1,3}\.){3}\d{1,3}$"
+                                                   class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                                            <button onclick="setTargetIP()"
+                                                    class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                                                Set IP
+                                            </button>
+                                        </div>
+                                        <div id="current-ip-display" class="mt-1 text-sm text-gray-600">No target IP configured</div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700">Distance Threshold (nautical miles)</label>
+                                        <input type="number" id="distance-threshold" value="10" step="0.1"
+                                               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                                    </div>
+                                    <div>
+                                        <button id="broadcast-toggle" onclick="toggleSendingToTarget()"
+                                                class="w-full px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+                                            Not Sending to Target IP
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Events Section -->
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Recent Events</h2>
+                
+                <!-- Manual Event Buttons -->
+                <div class="mb-4 space-y-4">
+                    <!-- Flight Control Section -->
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Flight Control</h3>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="recordManualEvent('flight_started', 'Operator')" 
+                                    class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors">
+                                Flight Started
+                            </button>
+                            <button onclick="recordManualEvent('flight_ended', 'Operator')" 
+                                    class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+                                Flight Ended
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Failure Management Section -->
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Failure Management</h3>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="recordManualEvent('failure_started', 'Operator')" 
+                                    class="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors">
+                                Failure Started
+                            </button>
+                            <button onclick="recordManualEvent('failure_recognised', 'Operator')" 
+                                    class="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors">
+                                Failure Recognised
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Operator State Section -->
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Operator State</h3>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="recordManualEvent('confused', 'Operator')" 
+                                    class="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors">
+                                Confused
+                            </button>
+                            <button onclick="recordManualEvent('back_on_track', 'Operator')" 
+                                    class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                                Back on Track
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Preparation Section -->
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Preparation</h3>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="recordManualEvent('preparations_started', 'Operator')" 
+                                    class="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 transition-colors">
+                                Preparations Started
+                            </button>
+                            <button onclick="recordManualEvent('preparations_finished', 'Operator')" 
+                                    class="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 transition-colors">
+                                Preparations Finished
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow overflow-hidden">
+                    <table class="min-w-full">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Program</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="events-table-body" class="divide-y divide-gray-200">
+                            <!-- Events will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification" style="display: none" class="fixed top-4 right-4 px-6 py-3 rounded shadow-lg"></div>
+
+    <style>
+        .ip-config {
+            margin-bottom: 1rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+        .ip-config input {
+            padding: 0.5rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 200px;
+        }
+        .ip-config button {
+            padding: 0.5rem 1rem;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .ip-config button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</body>
+</html>

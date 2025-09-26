@@ -1,0 +1,372 @@
+package programs
+
+import "html/template"
+
+// HTML templates
+var programManagerTemplate = template.Must(template.New("program-manager").Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#3b82f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="OpStation">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+    <title>Program Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        .notification {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 1rem 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            transition: all 0.3s ease-in-out;
+        }
+        .notification.success {
+            background-color: #10b981;
+            color: white;
+        }
+        .notification.error {
+            background-color: #ef4444;
+            color: white;
+        }
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 300ms ease-in;
+        }
+        .htmx-request .htmx-indicator {
+            opacity: 1;
+        }
+        .htmx-request.htmx-indicator {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-8" hx-boost="true">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex items-center justify-between mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">Program Manager</h1>
+            <div class="flex space-x-4">
+                <button 
+                    id="broadcast-toggle" 
+                    hx-post="/gps/broadcast-toggle"
+                    hx-trigger="click"
+                    hx-target="#broadcast-status"
+                    hx-swap="outerHTML"
+                    class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+                    <span class="htmx-indicator">🔄</span>
+                    Not Sending to Target IP
+                </button>
+                <button 
+                    hx-get="/programs/status-all"
+                    hx-trigger="click"
+                    hx-target="#programs-container"
+                    hx-swap="innerHTML"
+                    class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors">
+                    <span class="htmx-indicator">🔄</span>
+                    Refresh Now
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Programs Section -->
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Programs</h2>
+                <div 
+                    id="programs-container" 
+                    class="space-y-4"
+                    hx-get="/programs/status-all"
+                    hx-trigger="load, every 5s">
+                    <!-- Programs will be loaded here -->
+                </div>
+
+                <!-- GPS Section -->
+                <div class="mt-8">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">GPS Position</h2>
+                    <div 
+                        id="gps-display" 
+                        class="bg-white rounded-lg shadow p-4"
+                        hx-get="/gps/position"
+                        hx-trigger="load, every 2s"
+                        hx-swap="innerHTML">
+                        <div class="text-gray-500">Waiting for GPS data...</div>
+                    </div>
+
+                    <!-- Target Position Section -->
+                    <div class="mt-4">
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">Target Position</h3>
+                        <div class="bg-white rounded-lg shadow p-4">
+                            <div class="mb-4">
+                                <p class="text-sm text-gray-600 mb-2">Center: Currock Hill (54.9275°N, 1.8342°W)</p>
+                            </div>
+                            
+                            <!-- GPS Sending Configuration -->
+                            <div 
+                                id="gps-config"
+                                hx-get="/gps/config"
+                                hx-trigger="load"
+                                hx-swap="innerHTML">
+                                <!-- GPS config will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Events Section -->
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Recent Events</h2>
+                
+                <!-- Manual Event Buttons -->
+                <div class="mb-4 space-y-4">
+                    <!-- Flight Control Section -->
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Flight Control</h3>
+                        <div class="flex flex-wrap gap-2">
+                            <button 
+                                hx-post="/events/manual"
+                                hx-vals='{"type": "flight_started", "program": "Operator"}'
+                                hx-target="#events-container"
+                                hx-swap="innerHTML"
+                                class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors">
+                                <span class="htmx-indicator">🔄</span>
+                                Flight Started
+                            </button>
+                            <button 
+                                hx-post="/events/manual"
+                                hx-vals='{"type": "flight_ended", "program": "Operator"}'
+                                hx-target="#events-container"
+                                hx-swap="innerHTML"
+                                class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+                                <span class="htmx-indicator">🔄</span>
+                                Flight Ended
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Failure Management Section -->
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Failure Management</h3>
+                        <div class="flex flex-wrap gap-2">
+                            <button 
+                                hx-post="/events/manual"
+                                hx-vals='{"type": "failure_started", "program": "Operator"}'
+                                hx-target="#events-container"
+                                hx-swap="innerHTML"
+                                class="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors">
+                                <span class="htmx-indicator">🔄</span>
+                                Failure Started
+                            </button>
+                            <button 
+                                hx-post="/events/manual"
+                                hx-vals='{"type": "failure_recognised", "program": "Operator"}'
+                                hx-target="#events-container"
+                                hx-swap="innerHTML"
+                                class="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors">
+                                <span class="htmx-indicator">🔄</span>
+                                Failure Recognised
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Operator State Section -->
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Operator State</h3>
+                        <div class="flex flex-wrap gap-2">
+                            <button 
+                                hx-post="/events/manual"
+                                hx-vals='{"type": "confused", "program": "Operator"}'
+                                hx-target="#events-container"
+                                hx-swap="innerHTML"
+                                class="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors">
+                                <span class="htmx-indicator">🔄</span>
+                                Confused
+                            </button>
+                            <button 
+                                hx-post="/events/manual"
+                                hx-vals='{"type": "back_on_track", "program": "Operator"}'
+                                hx-target="#events-container"
+                                hx-swap="innerHTML"
+                                class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                                <span class="htmx-indicator">🔄</span>
+                                Back on Track
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Preparation Section -->
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Preparation</h3>
+                        <div class="flex flex-wrap gap-2">
+                            <button 
+                                hx-post="/events/manual"
+                                hx-vals='{"type": "preparations_started", "program": "Operator"}'
+                                hx-target="#events-container"
+                                hx-swap="innerHTML"
+                                class="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 transition-colors">
+                                <span class="htmx-indicator">🔄</span>
+                                Preparations Started
+                            </button>
+                            <button 
+                                hx-post="/events/manual"
+                                hx-vals='{"type": "preparations_finished", "program": "Operator"}'
+                                hx-target="#events-container"
+                                hx-swap="innerHTML"
+                                class="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 transition-colors">
+                                <span class="htmx-indicator">🔄</span>
+                                Preparations Finished
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Events Table -->
+                <div 
+                    id="events-container"
+                    hx-get="/events/list"
+                    hx-trigger="load, every 2s"
+                    class="bg-white rounded-lg shadow overflow-hidden">
+                    <!-- Events will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notification-container"></div>
+
+    <!-- Wake Lock Script -->
+    <script>
+        // Initialize wake lock
+        let wakeLock = null;
+
+        async function enableWakeLock() {
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                console.log('Wake Lock is active');
+            } catch (err) {
+                console.error('Wake Lock error:', err);
+            }
+        }
+
+        // Enable wake lock when the page loads
+        document.addEventListener('DOMContentLoaded', async () => {
+            await enableWakeLock();
+        });
+
+        // Handle visibility change
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+                await enableWakeLock();
+            }
+        });
+
+        // Show notifications
+        function showNotification(message, type = 'success') {
+            const container = document.getElementById('notification-container');
+            const notification = document.createElement('div');
+            notification.className = "notification " + type;
+            notification.textContent = message;
+            container.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+
+        // Handle HTMX events for notifications
+        document.addEventListener('htmx:responseError', (e) => {
+            showNotification('Request failed', 'error');
+        });
+
+        document.addEventListener('htmx:afterRequest', (e) => {
+            if (e.detail.successful && e.detail.xhr.status === 200) {
+                const action = e.detail.requestConfig.verb;
+                const path = e.detail.requestConfig.path;
+                
+                if (path.includes('/launch')) {
+                    showNotification('Program launched successfully');
+                } else if (path.includes('/kill')) {
+                    showNotification('Program terminated successfully');
+                } else if (path.includes('/manual-event')) {
+                    showNotification('Event recorded successfully');
+                }
+            }
+        });
+    </script>
+</body>
+</html>`))
+
+var programListTemplate = template.Must(template.New("program-list").Parse(`
+{{range $name, $program := .Programs}}
+{{$state := index $.States $name}}
+<div class="flex items-center justify-between p-4 bg-white rounded-lg shadow mb-4">
+    <div class="flex items-center">
+        <div class="w-3 h-3 rounded-full mr-3 {{if $state}}{{if $state.Running}}bg-green-500{{else}}bg-red-500{{end}}{{else}}bg-gray-500{{end}}"></div>
+        <span class="text-lg font-medium">{{$name}}</span>
+    </div>
+    <div class="flex space-x-2">
+        <button 
+            hx-post="/programs/launch?name={{$name}}"
+            hx-target="closest div"
+            hx-swap="outerHTML"
+            hx-trigger="click"
+            {{if and $state $state.Running}}disabled{{end}}
+            class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors {{if and $state $state.Running}}opacity-50 cursor-not-allowed{{end}}">
+            <span class="htmx-indicator">🔄</span>
+            Launch
+        </button>
+        {{if $program.CanKill}}
+        <button 
+            hx-post="/programs/kill?name={{$name}}"
+            hx-target="closest div"
+            hx-swap="outerHTML"
+            hx-trigger="click"
+            {{if or (not $state) (not $state.Running)}}disabled{{end}}
+            class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors {{if or (not $state) (not $state.Running)}}opacity-50 cursor-not-allowed{{end}}">
+            <span class="htmx-indicator">🔄</span>
+            Kill
+        </button>
+        {{end}}
+    </div>
+</div>
+{{end}}`))
+
+var programCardTemplate = template.Must(template.New("program-card").Parse(`
+<div class="flex items-center justify-between p-4 bg-white rounded-lg shadow mb-4">
+    <div class="flex items-center">
+        <div class="w-3 h-3 rounded-full mr-3 {{if .State}}{{if .State.Running}}bg-green-500{{else}}bg-red-500{{end}}{{else}}bg-gray-500{{end}}"></div>
+        <span class="text-lg font-medium">{{.Name}}</span>
+    </div>
+    <div class="flex space-x-2">
+        <button 
+            hx-post="/programs/launch?name={{.Name}}"
+            hx-target="closest div"
+            hx-swap="outerHTML"
+            hx-trigger="click"
+            {{if and .State .State.Running}}disabled{{end}}
+            class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors {{if and .State .State.Running}}opacity-50 cursor-not-allowed{{end}}">
+            <span class="htmx-indicator">🔄</span>
+            Launch
+        </button>
+        {{if .Program.CanKill}}
+        <button 
+            hx-post="/programs/kill?name={{.Name}}"
+            hx-target="closest div"
+            hx-swap="outerHTML"
+            hx-trigger="click"
+            {{if or (not .State) (not .State.Running)}}disabled{{end}}
+            class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors {{if or (not .State) (not .State.Running)}}opacity-50 cursor-not-allowed{{end}}">
+            <span class="htmx-indicator">🔄</span>
+            Kill
+        </button>
+        {{end}}
+    </div>
+</div>`))

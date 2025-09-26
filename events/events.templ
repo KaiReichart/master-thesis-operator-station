@@ -1,0 +1,26 @@
+package events
+
+templ EventsList(events []Event) {
+	<table class="min-w-full">
+		<thead class="bg-gray-50">
+			<tr>
+				<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+				<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Program</th>
+				<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+			</tr>
+		</thead>
+		<tbody class="divide-y divide-gray-200">
+			for _, event := range events {
+				<tr class="border-b">
+					<td class="px-4 py-2">{ event.Timestamp.Format("15:04:05") }</td>
+					<td class="px-4 py-2">{ event.Program }</td>
+					<td class="px-4 py-2">
+						<span class={ "px-2 py-1 rounded", getEventTypeClass(event.Type) }>
+							{ formatEventType(event.Type) }
+						</span>
+					</td>
+				</tr>
+			}
+		</tbody>
+	</table>
+}

@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mental Rotation Task</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            background-color: #f8f9fa;
+            color: #2c3e50;
+        }
+
+        .container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        #instructions {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #f8f9fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+        }
+
+        #instructions.hidden {
+            display: none;
+        }
+
+        .instructions-content {
+            max-width: 800px;
+            padding: 2rem;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        #task-view {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #f8f9fa;
+            display: none;
+            flex-direction: column;
+            z-index: 1;
+        }
+
+        #task-view.visible {
+            display: flex;
+        }
+
+        .task-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 1rem 0;
+        }
+
+        .image-container {
+            width: 100%;
+            max-width: 800px;
+            height: calc(100vh - 250px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .controls {
+            display: flex;
+            flex: 1;
+            justify-content: center;
+            gap: 3rem;
+            padding: 2rem;
+            padding-bottom: 3rem;
+            margin-bottom: 1rem;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 -4px 6px rgba(0,0,0,0.05);
+        }
+
+        .answer-button {
+            padding: 1rem 2rem;
+            font-size: 2rem;
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: white;
+            color: #3498db;
+            transition: all 0.2s ease;
+            min-width: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .answer-button:hover {
+            background-color: #3498db;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .answer-button:disabled {
+            background-color: #f5f5f5;
+            border-color: #ccc;
+            color: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .input-group {
+            margin: 1.5rem 0;
+            text-align: center;
+        }
+
+        .input-group input {
+            padding: 0.8rem 1rem;
+            font-size: 1rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            width: 250px;
+            transition: border-color 0.2s ease;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .error-message {
+            color: #e74c3c;
+            margin-top: 0.5rem;
+            display: none;
+            font-size: 0.9rem;
+        }
+
+        button {
+            padding: 0.8rem 1.5rem;
+            font-size: 1rem;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+            transform: translateY(-2px);
+        }
+
+        #results {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #f8f9fa;
+            display: none;
+            z-index: 3;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #results.visible {
+            display: flex;
+        }
+
+        .results-content {
+            text-align: center;
+            padding: 2rem;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            max-width: 600px;
+        }
+
+        .results-content h2 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            font-size: 2rem;
+        }
+
+        .results-content p {
+            color: #666;
+            font-size: 1.2rem;
+            line-height: 1.6;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            color: #2c3e50;
+        }
+
+        p {
+            line-height: 1.6;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="instructions">
+            <div class="instructions-content">
+                <div class="input-group">
+                    <label for="participant-id">Teilnehmer Code:</label>
+                    <input type="text" id="participant-id" placeholder="Enter your ID">
+                    <div id="participant-error" class="error-message">Bitte geben Sie Ihren Teilnehmer Code ein</div>
+                </div>
+                <p>In dieser Aufgabe werden zwei 3D-Grafiken angezeigt. Ihre Aufgabe ist es, festzustellen, ob die beiden Grafiken dieselbe 3D-Figur darstellen, obwohl sie in unterschiedlichen Orientierungen gezeichnet sind.</p>
+                <button onclick="startTask()">Start Task</button>
+            </div>
+        </div>
+        <div id="task-view" class="hidden">
+            <div class="task-container">
+                <div class="image-container">
+                    <img id="task-image" src="" alt="3D object">
+                </div>
+            </div>
+            <div class="controls">
+                <button class="answer-button" onclick="submitAnswer(true)">
+                    <i class="fas fa-check"></i>
+                    Gleiche Figur
+                </button>
+                <button class="answer-button" onclick="submitAnswer(false)">
+                    <i class="fas fa-times"></i>
+                    Andere Figur
+                </button>
+            </div>
+        </div>
+        <div id="results">
+            <div class="results-content">
+                <h2>Vielen Dank für Ihre Teilnahme!</h2>
+                <p>Sie haben alle Aufgaben erfolgreich abgeschlossen.</p>
+            </div>
+        </div>
+    </div>
+    <script>
+        let tasks = [];
+        let currentTaskIndex = 0;
+        let startTime = null;
+        let participantId = '';
+        async function loadTasks() {
+            const response = await fetch('/mental-rotation/tasks');
+            tasks = await response.json();
+        }
+        function startTask() {
+            participantId = document.getElementById('participant-id').value.trim();
+            if (!participantId) {
+                document.getElementById('participant-error').style.display = 'block';
+                return;
+            }
+            document.getElementById('participant-error').style.display = 'none';
+            document.getElementById('instructions').classList.add('hidden');
+            document.getElementById('task-view').classList.add('visible');
+            loadTasks().then(() => {
+                showCurrentTask();
+            });
+        }
+        function showCurrentTask() {
+            const task = tasks[currentTaskIndex];
+            document.getElementById('task-image').src = `/mental-rotation/images/${task.image}`;
+            startTime = new Date();
+        }
+        async function submitAnswer(userAnswer) {
+            const endTime = new Date();
+            const timeTaken = endTime - startTime;
+            const result = {
+                participantId: participantId,
+                image: tasks[currentTaskIndex].image,
+                isCorrect: userAnswer === tasks[currentTaskIndex].correctAnswer,
+                timeTaken: timeTaken,
+                timestamp: new Date().toISOString()
+            };
+            await fetch('/mental-rotation/submit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(result)
+            });
+            currentTaskIndex++;
+            if (currentTaskIndex < tasks.length) {
+                showCurrentTask();
+            } else {
+                showResults();
+            }
+        }
+        async function showResults() {
+            document.getElementById('task-view').classList.remove('visible');
+            document.getElementById('results').classList.add('visible');
+            const resultsContent = document.getElementById('results-content');
+            resultsContent.innerHTML = `
+                <h2>Vielen Dank für Ihre Teilnahme!</h2>
+                <p>Sie haben alle Aufgaben erfolgreich abgeschlossen.</p>
+            `;
+        }
+    </script>
+</body>
+</html> 

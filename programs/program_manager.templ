@@ -1,0 +1,203 @@
+package programs
+
+templ ProgramManager() {
+	@Layout("Program Manager") {
+		<div class="max-w-6xl mx-auto">
+			<div class="flex items-center justify-between mb-8">
+				<h1 class="text-3xl font-bold text-gray-800">Program Manager</h1>
+				<div class="flex space-x-4">
+					<button
+						id="broadcast-toggle"
+						hx-post="/gps/broadcast-toggle"
+						hx-trigger="click"
+						hx-target="#broadcast-status"
+						hx-swap="outerHTML"
+						class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+					>
+						<span class="htmx-indicator">🔄</span>
+						Not Sending to Target IP
+					</button>
+					<button
+						hx-get="/programs/status-all"
+						hx-trigger="click"
+						hx-target="#programs-container"
+						hx-swap="innerHTML"
+						class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+					>
+						<span class="htmx-indicator">🔄</span>
+						Refresh Now
+					</button>
+				</div>
+			</div>
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+				<!-- Programs Section -->
+				<div>
+					<h2 class="text-2xl font-bold text-gray-800 mb-4">Programs</h2>
+					<div
+						id="programs-container"
+						class="space-y-4"
+						hx-get="/programs/status-all"
+						hx-trigger="load, every 5s"
+					>
+						<!-- Programs will be loaded here -->
+					</div>
+					<!-- GPS Section -->
+					<div class="mt-8">
+						<h2 class="text-2xl font-bold text-gray-800 mb-4">GPS Position</h2>
+						<div
+							id="gps-display"
+							class="bg-white rounded-lg shadow p-4"
+							hx-get="/gps/position"
+							hx-trigger="load, every 2s"
+							hx-swap="innerHTML"
+						>
+							<div class="text-gray-500">Waiting for GPS data...</div>
+						</div>
+						<!-- Target Position Section -->
+						<div class="mt-4">
+							<h3 class="text-xl font-bold text-gray-800 mb-2">Target Position</h3>
+							<div class="bg-white rounded-lg shadow p-4">
+								<div class="mb-4">
+									<p class="text-sm text-gray-600 mb-2">Center: Currock Hill (54.9275°N, 1.8342°W)</p>
+								</div>
+								<!-- GPS Sending Configuration -->
+								<div
+									id="gps-config"
+									hx-get="/gps/config"
+									hx-trigger="load"
+									hx-swap="innerHTML"
+								>
+									<!-- GPS config will be loaded here -->
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+				<!-- Events Section -->
+				<div>
+					<h2 class="text-2xl font-bold text-gray-800 mb-4">Recent Events</h2>
+					@EventControls()
+					<!-- Events Table -->
+					<div
+						id="events-container"
+						hx-get="/events/list"
+						hx-trigger="load, every 2s"
+						class="bg-white rounded-lg shadow overflow-hidden"
+					>
+						<!-- Events will be loaded here -->
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ EventControls() {
+	<!-- Manual Event Buttons -->
+	<div class="mb-4 space-y-4">
+		<!-- Flight Control Section -->
+		<div>
+			<h3 class="text-sm font-semibold text-gray-700 mb-2">Flight Control</h3>
+			<div class="flex flex-wrap gap-2">
+				<button
+					hx-post="/events/manual"
+					hx-vals='{"type": "flight_started", "program": "Operator"}'
+					hx-target="#events-container"
+					hx-swap="innerHTML"
+					class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+				>
+					<span class="htmx-indicator">🔄</span>
+					Flight Started
+				</button>
+				<button
+					hx-post="/events/manual"
+					hx-vals='{"type": "flight_ended", "program": "Operator"}'
+					hx-target="#events-container"
+					hx-swap="innerHTML"
+					class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+				>
+					<span class="htmx-indicator">🔄</span>
+					Flight Ended
+				</button>
+			</div>
+		</div>
+		<!-- Failure Management Section -->
+		<div>
+			<h3 class="text-sm font-semibold text-gray-700 mb-2">Failure Management</h3>
+			<div class="flex flex-wrap gap-2">
+				<button
+					hx-post="/events/manual"
+					hx-vals='{"type": "failure_started", "program": "Operator"}'
+					hx-target="#events-container"
+					hx-swap="innerHTML"
+					class="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors"
+				>
+					<span class="htmx-indicator">🔄</span>
+					Failure Started
+				</button>
+				<button
+					hx-post="/events/manual"
+					hx-vals='{"type": "failure_recognised", "program": "Operator"}'
+					hx-target="#events-container"
+					hx-swap="innerHTML"
+					class="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors"
+				>
+					<span class="htmx-indicator">🔄</span>
+					Failure Recognised
+				</button>
+			</div>
+		</div>
+		<!-- Operator State Section -->
+		<div>
+			<h3 class="text-sm font-semibold text-gray-700 mb-2">Operator State</h3>
+			<div class="flex flex-wrap gap-2">
+				<button
+					hx-post="/events/manual"
+					hx-vals='{"type": "confused", "program": "Operator"}'
+					hx-target="#events-container"
+					hx-swap="innerHTML"
+					class="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors"
+				>
+					<span class="htmx-indicator">🔄</span>
+					Confused
+				</button>
+				<button
+					hx-post="/events/manual"
+					hx-vals='{"type": "back_on_track", "program": "Operator"}'
+					hx-target="#events-container"
+					hx-swap="innerHTML"
+					class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+				>
+					<span class="htmx-indicator">🔄</span>
+					Back on Track
+				</button>
+			</div>
+		</div>
+		<!-- Preparation Section -->
+		<div>
+			<h3 class="text-sm font-semibold text-gray-700 mb-2">Preparation</h3>
+			<div class="flex flex-wrap gap-2">
+				<button
+					hx-post="/events/manual"
+					hx-vals='{"type": "preparations_started", "program": "Operator"}'
+					hx-target="#events-container"
+					hx-swap="innerHTML"
+					class="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 transition-colors"
+				>
+					<span class="htmx-indicator">🔄</span>
+					Preparations Started
+				</button>
+				<button
+					hx-post="/events/manual"
+					hx-vals='{"type": "preparations_finished", "program": "Operator"}'
+					hx-target="#events-container"
+					hx-swap="innerHTML"
+					class="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 transition-colors"
+				>
+					<span class="htmx-indicator">🔄</span>
+					Preparations Finished
+				</button>
+			</div>
+		</div>
+	</div>
+}

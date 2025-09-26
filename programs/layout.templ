@@ -1,0 +1,114 @@
+package programs
+
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<meta name="theme-color" content="#3b82f6"/>
+			<meta name="apple-mobile-web-app-capable" content="yes"/>
+			<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+			<meta name="apple-mobile-web-app-title" content="OpStation"/>
+			<link rel="manifest" href="/manifest.json"/>
+			<link rel="apple-touch-icon" href="/icons/icon-192x192.png"/>
+			<title>{ title }</title>
+			<script src="https://cdn.tailwindcss.com"></script>
+			<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+			<style>
+				.notification {
+					position: fixed;
+					top: 1rem;
+					right: 1rem;
+					padding: 1rem 1.5rem;
+					border-radius: 0.5rem;
+					box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+					z-index: 1000;
+					transition: all 0.3s ease-in-out;
+				}
+				.notification.success {
+					background-color: #10b981;
+					color: white;
+				}
+				.notification.error {
+					background-color: #ef4444;
+					color: white;
+				}
+				.htmx-indicator {
+					opacity: 0;
+					transition: opacity 300ms ease-in;
+				}
+				.htmx-request .htmx-indicator {
+					opacity: 1;
+				}
+				.htmx-request.htmx-indicator {
+					opacity: 1;
+				}
+			</style>
+		</head>
+		<body class="bg-gray-100 min-h-screen p-8" hx-boost="true">
+			{ children... }
+			<!-- Notification Container -->
+			<div id="notification-container"></div>
+			<!-- Wake Lock Script -->
+			<script>
+				// Initialize wake lock
+				let wakeLock = null;
+
+				async function enableWakeLock() {
+					try {
+						wakeLock = await navigator.wakeLock.request('screen');
+						console.log('Wake Lock is active');
+					} catch (err) {
+						console.error('Wake Lock error:', err);
+					}
+				}
+
+				// Enable wake lock when the page loads
+				document.addEventListener('DOMContentLoaded', async () => {
+					await enableWakeLock();
+				});
+
+				// Handle visibility change
+				document.addEventListener('visibilitychange', async () => {
+					if (document.visibilityState === 'visible') {
+						await enableWakeLock();
+					}
+				});
+
+				// Show notifications
+				function showNotification(message, type = 'success') {
+					const container = document.getElementById('notification-container');
+					const notification = document.createElement('div');
+					notification.className = "notification " + type;
+					notification.textContent = message;
+					container.appendChild(notification);
+					
+					setTimeout(() => {
+						notification.remove();
+					}, 3000);
+				}
+
+				// Handle HTMX events for notifications
+				document.addEventListener('htmx:responseError', (e) => {
+					showNotification('Request failed', 'error');
+				});
+
+				document.addEventListener('htmx:afterRequest', (e) => {
+					if (e.detail.successful && e.detail.xhr.status === 200) {
+						const action = e.detail.requestConfig.verb;
+						const path = e.detail.requestConfig.path;
+						
+						if (path.includes('/launch')) {
+							showNotification('Program launched successfully');
+						} else if (path.includes('/kill')) {
+							showNotification('Program terminated successfully');
+						} else if (path.includes('/manual-event')) {
+							showNotification('Event recorded successfully');
+						}
+					}
+				});
+			</script>
+		</body>
+	</html>
+}

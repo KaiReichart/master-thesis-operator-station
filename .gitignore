@@ -1,0 +1,7 @@
+*.exe
+*.sln
+/logs
+/tmp
+/.vscode
+.DS_Store
+temp_uploads/

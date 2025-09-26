@@ -1,0 +1,425 @@
+package data_analysis
+
+templ DataAnalysisPage() {
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+		<title>Flight Data Visualizer</title>
+		<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+		<style>
+			body {
+				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+				margin: 0;
+				padding: 20px;
+				background-color: #f5f5f5;
+			}
+			
+			.container {
+				max-width: 1200px;
+				margin: 0 auto;
+				background: white;
+				padding: 20px;
+				border-radius: 8px;
+				box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+			}
+			
+			h1 {
+				text-align: center;
+				color: #333;
+				margin-bottom: 30px;
+			}
+			
+			.section {
+				margin-bottom: 30px;
+				padding: 20px;
+				border: 1px solid #ddd;
+				border-radius: 5px;
+				background: #fafafa;
+			}
+			
+			.section h3 {
+				margin-top: 0;
+				color: #444;
+			}
+			
+			input[type="file"] {
+				display: none;
+			}
+			
+			button {
+				background-color: #007cba;
+				color: white;
+				border: none;
+				padding: 10px 20px;
+				border-radius: 4px;
+				cursor: pointer;
+				font-size: 14px;
+			}
+			
+			button:hover {
+				background-color: #005a8b;
+			}
+			
+			button:disabled {
+				background-color: #ccc;
+				cursor: not-allowed;
+			}
+			
+			select {
+				width: 100%;
+				padding: 8px;
+				border: 1px solid #ddd;
+				border-radius: 4px;
+				background: white;
+			}
+			
+			.status {
+				padding: 10px;
+				margin: 10px 0;
+				border-radius: 4px;
+			}
+			
+			.status.success {
+				background-color: #d4edda;
+				color: #155724;
+				border: 1px solid #c3e6cb;
+			}
+			
+			.status.error {
+				background-color: #f8d7da;
+				color: #721c24;
+				border: 1px solid #f5c6cb;
+			}
+			
+			.status.info {
+				background-color: #cce7ff;
+				color: #004085;
+				border: 1px solid #99d3ff;
+			}
+			
+			.slider-container {
+				margin: 20px 0;
+			}
+			
+			.slider {
+				width: 100%;
+				margin: 10px 0;
+			}
+			
+			.time-display {
+				color: #007cba;
+				font-weight: bold;
+				margin: 5px 0;
+			}
+			
+			.controls {
+				display: flex;
+				align-items: center;
+				gap: 10px;
+				margin-bottom: 10px;
+			}
+			
+			.controls input[type="text"] {
+				padding: 6px;
+				border: 1px solid #ddd;
+				border-radius: 4px;
+			}
+			
+			.markers-table {
+				width: 100%;
+				border-collapse: collapse;
+				margin-top: 10px;
+			}
+			
+			.markers-table th,
+			.markers-table td {
+				border: 1px solid #ddd;
+				padding: 8px;
+				text-align: left;
+			}
+			
+			.markers-table th {
+				background-color: #f2f2f2;
+			}
+			
+			.tabs {
+				display: flex;
+				border-bottom: 1px solid #ddd;
+				margin-bottom: 20px;
+			}
+			
+			.tab {
+				padding: 10px 20px;
+				cursor: pointer;
+				border: none;
+				background: none;
+				border-bottom: 2px solid transparent;
+			}
+			
+			.tab.active {
+				border-bottom-color: #007cba;
+				color: #007cba;
+			}
+			
+			.tab-content {
+				display: none;
+			}
+			
+			.tab-content.active {
+				display: block;
+			}
+			
+			.graph-container {
+				height: 400px;
+				margin-bottom: 20px;
+			}
+			
+			.map-container {
+				height: 600px;
+				width: 100%;
+				margin-bottom: 20px;
+				border: 1px solid #ddd;
+				border-radius: 4px;
+				overflow: hidden;
+			}
+			
+			.subsection {
+				margin-bottom: 20px;
+				padding: 15px;
+				border: 1px solid #eee;
+				border-radius: 4px;
+				background: white;
+			}
+			
+			.subsection h4 {
+				margin-top: 0;
+				margin-bottom: 15px;
+				color: #555;
+				font-size: 16px;
+			}
+			
+			.controls {
+				display: flex;
+				align-items: center;
+				gap: 10px;
+				flex-wrap: wrap;
+			}
+			
+			.flight-controls {
+				display: flex;
+				align-items: center;
+				gap: 10px;
+				margin-bottom: 10px;
+			}
+			
+			.flight-controls select {
+				flex-grow: 1;
+			}
+			
+			.statistics-container {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+				gap: 20px;
+				margin-top: 20px;
+			}
+			
+			.aircraft-stats {
+				background: white;
+				border: 1px solid #ddd;
+				border-radius: 5px;
+				padding: 15px;
+			}
+			
+			.aircraft-stats h4 {
+				margin-top: 0;
+				margin-bottom: 15px;
+				color: #007cba;
+				border-bottom: 1px solid #eee;
+				padding-bottom: 5px;
+			}
+			
+			.stats-table {
+				width: 100%;
+				border-collapse: collapse;
+				font-size: 14px;
+			}
+			
+			.stats-table th,
+			.stats-table td {
+				text-align: left;
+				padding: 8px 5px;
+				border-bottom: 1px solid #f0f0f0;
+			}
+			
+			.stats-table th {
+				background-color: #f8f9fa;
+				font-weight: bold;
+			}
+			
+			.stats-table .metric-name {
+				width: 40%;
+			}
+			
+			.stats-table .metric-value {
+				width: 30%;
+				text-align: right;
+			}
+			
+			.variance-highlight {
+				background-color: #fff3cd;
+				font-weight: bold;
+			}
+			
+			.accordion {
+				border: 1px solid #ddd;
+				border-radius: 5px;
+				background: white;
+			}
+			
+			.accordion-header {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				padding: 15px 20px;
+				cursor: pointer;
+				background: #f8f9fa;
+				border-bottom: 1px solid #ddd;
+				transition: background-color 0.2s;
+			}
+			
+			.accordion-header:hover {
+				background: #e9ecef;
+			}
+			
+			.accordion-header h3 {
+				margin: 0;
+				color: #333;
+			}
+			
+			.accordion-icon {
+				font-size: 16px;
+				transition: transform 0.2s;
+				color: #007cba;
+			}
+			
+			.accordion-icon.rotated {
+				transform: rotate(180deg);
+			}
+			
+			.accordion-content {
+				max-height: 0;
+				overflow: hidden;
+				transition: max-height 0.3s ease-out;
+				padding: 0 20px;
+			}
+			
+			.accordion-content.open {
+				max-height: 2000px;
+				padding: 20px;
+				transition: max-height 0.3s ease-in;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<h1>Flight Data Visualizer</h1>
+			
+			<!-- Flight Selection -->
+			<div class="section">
+				<h3>Flight Selection</h3>
+				<div class="flight-controls">
+					<select id="flightDropdown" disabled>
+						<option value="">Loading flights...</option>
+					</select>
+					<button id="loadDataButton" disabled>Load Flight Data</button>
+					<input type="text" id="duplicateFlightTitle" placeholder="New flight name" disabled style="width: 200px;"/>
+					<button id="duplicateFlightButton" disabled>Duplicate Flight</button>
+					<button id="deleteFlightButton" disabled style="background-color: #dc3545;">Delete Flight</button>
+					<button id="refreshFlightsButton">Refresh Flights</button>
+					<button id="uploadButton" type="button" title="Import .sdlog, .sqlite, .db, or .csv files">Import Data</button>
+				</div>
+				<div class="flight-controls" style="margin-top: 10px;">
+					<button id="exportAirspeedAltitudeButton" disabled style="background-color: #28a745;">Export Airspeed & Altitude</button>
+					<button id="exportFullDataButton" disabled style="background-color: #6f42c1;">Export Full Flight Data</button>
+				</div>
+				<div id="flightStatus"></div>
+				<input type="file" id="fileInput" accept=".sdlog,.sqlite,.db,.csv" style="display: none;"/>
+			</div>
+			
+			<!-- Markers -->
+			<div class="section" id="controlsSection" style="display: none;">
+				<h3>Markers</h3>
+				<div class="controls">
+					<input type="range" id="markerTimeSlider" class="slider" min="0" max="100" value="0" step="0.1" disabled style="flex-grow: 1;"/>
+					<label>
+						<input type="checkbox" id="previewToggle"/> Show Preview
+					</label>
+					<input type="text" id="markerLabelInput" placeholder="Marker label" disabled/>
+					<button id="addMarkerButton" disabled>Add Marker</button>
+					<button id="setTrimStartButton" disabled style="background-color: #28a745;">Set Trim Start</button>
+					<button id="setTrimEndButton" disabled style="background-color: #dc3545;">Set Trim End</button>
+					<button id="createDistanceMarkersButton" disabled>Create 9nm Distance Markers</button>
+					<button id="clearMarkersButton" disabled>Clear All Markers</button>
+				</div>
+				<div class="controls" style="margin-top: 10px;">
+					<input type="text" id="trimmedFlightTitle" placeholder="Trimmed flight name" disabled style="width: 200px;"/>
+					<button id="createTrimmedFlightButton" disabled>Create Trimmed Flight</button>
+				</div>
+				<div class="time-display" id="markerTimeDisplay">Time: 0.0s</div>
+				
+				<table class="markers-table" id="markersTable" style="display: none;">
+					<thead>
+						<tr>
+							<th>Time (s)</th>
+							<th>Label</th>
+							<th>Action</th>
+						</tr>
+					</thead>
+					<tbody id="markersTableBody">
+					</tbody>
+				</table>
+			</div>
+			
+			<!-- Statistics -->
+			<div class="section" id="statisticsSection" style="display: none;">
+				<div class="accordion">
+					<div class="accordion-header" onclick="toggleAccordion('statisticsAccordion')">
+						<h3>Flight Data Statistics</h3>
+						<span class="accordion-icon" id="statisticsAccordionIcon">▼</span>
+					</div>
+					<div class="accordion-content" id="statisticsAccordion">
+						<div id="statisticsContent">
+							<p>No statistics calculated yet. Load flight data to see variance and other statistics.</p>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Visualizations -->
+			<div class="section" id="visualizationSection" style="display: none;">
+				<div class="tabs">
+					<button class="tab active" onclick="showTab('altitude')">Altitude</button>
+					<button class="tab" onclick="showTab('map')">GPS Position</button>
+					<button class="tab" onclick="showTab('airspeed')">Airspeed</button>
+				</div>
+				
+				<div id="altitude-tab" class="tab-content active">
+					<div id="altitudeGraph" class="graph-container"></div>
+				</div>
+				
+				<div id="map-tab" class="tab-content">
+					<div id="mapGraph" class="map-container"></div>
+				</div>
+				
+				<div id="airspeed-tab" class="tab-content">
+					<div id="airspeedGraph" class="graph-container"></div>
+				</div>
+			</div>
+		</div>
+
+		@DataAnalysisScript()
+	</body>
+	</html>
+}

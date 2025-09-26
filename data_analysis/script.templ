@@ -1,0 +1,1414 @@
+package data_analysis
+
+templ DataAnalysisScript() {
+	<script>
+		// Global variables
+		let currentFlightData = null;
+		let currentMarkers = [];
+		let markerIdCounter = 0;
+		let maxTime = 100;
+		let previewUpdateTimeout = null;
+		let currentFlightId = null;
+
+		// Initialize event listeners
+		document.addEventListener('DOMContentLoaded', function() {
+			setupEventListeners();
+			loadFlights();
+		});
+
+		function setupEventListeners() {
+			const fileInput = document.getElementById('fileInput');
+			const uploadButton = document.getElementById('uploadButton');
+			const flightDropdown = document.getElementById('flightDropdown');
+			const loadDataButton = document.getElementById('loadDataButton');
+			const markerTimeSlider = document.getElementById('markerTimeSlider');
+			const previewToggle = document.getElementById('previewToggle');
+			const markerLabelInput = document.getElementById('markerLabelInput');
+			const addMarkerButton = document.getElementById('addMarkerButton');
+			const setTrimStartButton = document.getElementById('setTrimStartButton');
+			const setTrimEndButton = document.getElementById('setTrimEndButton');
+			const createDistanceMarkersButton = document.getElementById('createDistanceMarkersButton');
+			const clearMarkersButton = document.getElementById('clearMarkersButton');
+			const duplicateFlightButton = document.getElementById('duplicateFlightButton');
+			const duplicateFlightTitle = document.getElementById('duplicateFlightTitle');
+			const deleteFlightButton = document.getElementById('deleteFlightButton');
+			const createTrimmedFlightButton = document.getElementById('createTrimmedFlightButton');
+			const trimmedFlightTitle = document.getElementById('trimmedFlightTitle');
+			const refreshFlightsButton = document.getElementById('refreshFlightsButton');
+			const exportAirspeedAltitudeButton = document.getElementById('exportAirspeedAltitudeButton');
+			const exportFullDataButton = document.getElementById('exportFullDataButton');
+
+			// File upload events
+			uploadButton.addEventListener('click', () => {
+				fileInput.click();
+			});
+
+			fileInput.addEventListener('change', (e) => {
+				if (e.target.files.length > 0) {
+					handleFileUpload(e.target.files[0]);
+				}
+			});
+
+			// Flight selection events
+			flightDropdown.addEventListener('change', () => {
+				const hasSelection = !!flightDropdown.value;
+				loadDataButton.disabled = !hasSelection;
+				duplicateFlightButton.disabled = !hasSelection;
+				duplicateFlightTitle.disabled = !hasSelection;
+				deleteFlightButton.disabled = !hasSelection;
+				createTrimmedFlightButton.disabled = !hasSelection;
+				trimmedFlightTitle.disabled = !hasSelection;
+				exportAirspeedAltitudeButton.disabled = !hasSelection;
+				exportFullDataButton.disabled = !hasSelection;
+				
+				// Auto-populate duplicate title
+				if (hasSelection) {
+					const selectedOption = flightDropdown.options[flightDropdown.selectedIndex];
+					const originalTitle = selectedOption.textContent.split(': ')[1]?.split(' (')[0] || 'Flight';
+					duplicateFlightTitle.value = `Copy of ${originalTitle}`;
+				} else {
+					duplicateFlightTitle.value = '';
+				}
+			});
+
+			loadDataButton.addEventListener('click', loadFlightData);
+			duplicateFlightButton.addEventListener('click', duplicateFlight);
+			deleteFlightButton.addEventListener('click', deleteFlight);
+			createTrimmedFlightButton.addEventListener('click', createTrimmedFlightFromMarkers);
+			exportAirspeedAltitudeButton.addEventListener('click', () => exportFlightData('airspeed-altitude'));
+			exportFullDataButton.addEventListener('click', () => exportFlightData('full'));
+			if (refreshFlightsButton) {
+				refreshFlightsButton.addEventListener('click', loadFlights);
+			}
+
+
+			// Marker events
+			markerTimeSlider.addEventListener('input', updateMarkerTimeDisplay);
+			markerTimeSlider.addEventListener('input', updatePreviewMarker);
+
+			previewToggle.addEventListener('change', updatePreviewMarker);
+			addMarkerButton.addEventListener('click', addMarker);
+			setTrimStartButton.addEventListener('click', setTrimStart);
+			setTrimEndButton.addEventListener('click', setTrimEnd);
+			createDistanceMarkersButton.addEventListener('click', createDistanceMarkers);
+			clearMarkersButton.addEventListener('click', clearMarkers);
+
+		}
+
+		function loadFlights() {
+			const dropdown = document.getElementById('flightDropdown');
+			dropdown.innerHTML = '<option value="">Loading flights...</option>';
+			dropdown.disabled = true;
+			document.getElementById('loadDataButton').disabled = true;
+
+			fetch('/data-analysis/flights')
+			.then(response => response.json())
+			.then(flights => {
+				dropdown.innerHTML = '<option value="">Select a flight...</option>';
+				
+				if (flights && flights.length > 0) {
+					flights.forEach(flight => {
+						const option = document.createElement('option');
+						option.value = flight.id;
+						option.textContent = `${flight.id}: ${flight.title} (${flight.flight_number}) - ${flight.start_time}`;
+						dropdown.appendChild(option);
+					});
+					dropdown.disabled = false;
+					showStatus('flightStatus', `${flights.length} flights available`, 'info');
+				} else {
+					dropdown.innerHTML = '<option value="">No flights found - import data first</option>';
+					showStatus('flightStatus', 'No flights available. Please import a database or CSV file.', 'info');
+				}
+			})
+			.catch(error => {
+				console.error('Failed to load flights:', error);
+				dropdown.innerHTML = '<option value="">Error loading flights</option>';
+				showStatus('flightStatus', 'Failed to load flights: ' + error.message, 'error');
+			});
+		}
+
+		function handleFileUpload(file) {
+			const formData = new FormData();
+			formData.append('database', file);
+
+			showStatus('flightStatus', 'Uploading and importing database...', 'info');
+
+			fetch('/data-analysis/upload', {
+				method: 'POST',
+				body: formData
+			})
+			.then(response => response.json())
+			.then(data => {
+				if (data.status === 'success') {
+					showStatus('flightStatus', data.message, 'success');
+					// Reload flights after successful import
+					loadFlights();
+				} else {
+					showStatus('flightStatus', data.message || 'Upload failed', 'error');
+				}
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Upload failed: ' + error.message, 'error');
+			});
+		}
+
+		function loadFlightData() {
+			const flightId = document.getElementById('flightDropdown').value;
+			if (!flightId) return;
+
+			currentFlightId = parseInt(flightId);
+			showStatus('flightStatus', 'Loading flight data...', 'info');
+
+			// Load flight data and markers in parallel
+			Promise.all([
+				fetch(`/data-analysis/flight-data?flightId=${flightId}`).then(response => response.json()),
+				fetch(`/data-analysis/markers?flightId=${flightId}`).then(response => response.json())
+			])
+			.then(([flightData, markers]) => {
+				currentFlightData = flightData;
+				currentMarkers = markers || [];
+				
+				// Update marker ID counter to avoid conflicts
+				markerIdCounter = Math.max(0, ...currentMarkers.map(m => m.id || 0)) + 1;
+				
+				setupTimeControls();
+				showStatus('flightStatus', `Data loaded for flight ID ${flightId} with ${currentMarkers.length} markers`, 'success');
+				document.getElementById('controlsSection').style.display = 'block';
+				document.getElementById('statisticsSection').style.display = 'block';
+				document.getElementById('visualizationSection').style.display = 'block';
+				
+				updateMarkersTable();
+				updateVisualization();
+				loadStatistics(flightId);
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Failed to load flight data: ' + error.message, 'error');
+			});
+		}
+
+		function setupTimeControls() {
+			if (!currentFlightData || !currentFlightData.position_data) return;
+
+			// Find maximum time across all aircraft
+			maxTime = 0;
+			Object.values(currentFlightData.position_data).forEach(positions => {
+				if (positions.length > 0) {
+					const lastTime = positions[positions.length - 1].timestamp_seconds;
+					maxTime = Math.max(maxTime, lastTime);
+				}
+			});
+
+			// Update marker slider
+			const markerTimeSlider = document.getElementById('markerTimeSlider');
+			markerTimeSlider.min = 0;
+			markerTimeSlider.max = maxTime;
+			markerTimeSlider.value = 0;
+
+			// Enable controls
+			markerTimeSlider.disabled = false;
+			document.getElementById('markerLabelInput').disabled = false;
+			document.getElementById('addMarkerButton').disabled = false;
+			document.getElementById('setTrimStartButton').disabled = false;
+			document.getElementById('setTrimEndButton').disabled = false;
+			document.getElementById('createDistanceMarkersButton').disabled = false;
+			document.getElementById('clearMarkersButton').disabled = false;
+
+			// Enable trim controls
+			document.getElementById('trimmedFlightTitle').disabled = false;
+			document.getElementById('createTrimmedFlightButton').disabled = false;
+
+			updateMarkerTimeDisplay();
+
+			// Auto-populate trimmed flight title
+			if (currentFlightData && currentFlightData.flight) {
+				const originalTitle = currentFlightData.flight.title || 'Flight';
+				document.getElementById('trimmedFlightTitle').value = `Trimmed ${originalTitle}`;
+			}
+		}
+
+
+		function updateMarkerTimeDisplay() {
+			const time = parseFloat(document.getElementById('markerTimeSlider').value);
+			document.getElementById('markerTimeDisplay').textContent = `Time: ${time.toFixed(1)}s`;
+		}
+
+		function updatePreviewMarker() {
+			const markerTimeSlider = document.getElementById('markerTimeSlider');
+			const previewToggle = document.getElementById('previewToggle');
+			
+			// Auto-enable preview when slider moves
+			if (!previewToggle.checked) {
+				previewToggle.checked = true;
+			}
+			
+			// Debounce the update to reduce lag
+			clearTimeout(previewUpdateTimeout);
+			previewUpdateTimeout = setTimeout(() => {
+				if (currentFlightData) {
+					updateMapPreviewMarkerOptimized();
+					updateAltitudePreviewMarker();
+					updateAirspeedPreviewMarker();
+				}
+			}, 5); // 5ms debounce
+		}
+
+		function addMarker() {
+			const time = parseFloat(document.getElementById('markerTimeSlider').value);
+			let label = document.getElementById('markerLabelInput').value.trim();
+			
+			if (!label) {
+				label = `Marker ${currentMarkers.length + 1}`;
+			}
+
+			if (!currentFlightId) {
+				showStatus('flightStatus', 'No flight selected', 'error');
+				return;
+			}
+
+			const markerData = {
+				flight_id: currentFlightId,
+				time: time,
+				label: label
+			};
+
+			// Save marker to database
+			fetch('/data-analysis/markers', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(markerData)
+			})
+			.then(response => response.json())
+			.then(savedMarker => {
+				// Add to local array
+				currentMarkers.push(savedMarker);
+				currentMarkers.sort((a, b) => a.time - b.time);
+
+				document.getElementById('markerLabelInput').value = '';
+				document.getElementById('previewToggle').checked = false;
+				
+				updateMarkersTable();
+				updateVisualization();
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Failed to save marker: ' + error.message, 'error');
+			});
+		}
+
+		function removeMarker(markerId) {
+			// Delete from database
+			fetch(`/data-analysis/markers?id=${markerId}`, {
+				method: 'DELETE'
+			})
+			.then(response => response.json())
+			.then(() => {
+				// Remove from local array
+				currentMarkers = currentMarkers.filter(m => m.id !== markerId);
+				updateMarkersTable();
+				updateVisualization();
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Failed to delete marker: ' + error.message, 'error');
+			});
+		}
+
+		function clearMarkers() {
+			if (currentMarkers.length === 0) return;
+			
+			// Delete all markers from database
+			const deletePromises = currentMarkers.map(marker => 
+				fetch(`/data-analysis/markers?id=${marker.id}`, { method: 'DELETE' })
+			);
+			
+			Promise.all(deletePromises)
+			.then(() => {
+				currentMarkers = [];
+				updateMarkersTable();
+				updateVisualization();
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Failed to clear markers: ' + error.message, 'error');
+			});
+		}
+
+		function updateMarkersTable() {
+			const tbody = document.getElementById('markersTableBody');
+			const table = document.getElementById('markersTable');
+			
+			tbody.innerHTML = '';
+			
+			if (currentMarkers.length === 0) {
+				table.style.display = 'none';
+				return;
+			}
+			
+			table.style.display = 'table';
+			
+			currentMarkers.forEach(marker => {
+				const row = document.createElement('tr');
+				
+				// Style row based on marker type
+				let rowStyle = '';
+				let markerIcon = '';
+				let removeButton = `<button onclick="removeMarker(${marker.id})">Remove</button>`;
+				
+				if (marker.type === 'trim_start') {
+					rowStyle = 'background-color: #d4edda; border-left: 4px solid #28a745;';
+					markerIcon = '🟢 ';
+					removeButton = `<button onclick="removeMarker(${marker.id})" style="background-color: #28a745; color: white;">Remove</button>`;
+				} else if (marker.type === 'trim_end') {
+					rowStyle = 'background-color: #f8d7da; border-left: 4px solid #dc3545;';
+					markerIcon = '🔴 ';
+					removeButton = `<button onclick="removeMarker(${marker.id})" style="background-color: #dc3545; color: white;">Remove</button>`;
+				}
+				
+				row.style.cssText = rowStyle;
+				row.innerHTML = `
+					<td>${marker.time.toFixed(1)}</td>
+					<td>${markerIcon}${marker.label}</td>
+					<td>${removeButton}</td>
+				`;
+				tbody.appendChild(row);
+			});
+		}
+
+		function updateVisualization() {
+			if (!currentFlightData) return;
+
+			const previewTime = document.getElementById('previewToggle').checked ? 
+				parseFloat(document.getElementById('markerTimeSlider').value) : null;
+
+			updateAltitudeGraph(0, maxTime, previewTime);
+			updateMapGraph(0, maxTime, previewTime);
+			updateAirspeedGraph(0, maxTime, previewTime);
+		}
+
+		function updateMapPreviewMarkerOptimized() {
+			if (!currentFlightData) return;
+			
+			const previewTime = document.getElementById('previewToggle').checked ? 
+				parseFloat(document.getElementById('markerTimeSlider').value) : null;
+			
+			// Get current map data
+			const mapDiv = document.getElementById('mapGraph');
+			if (!mapDiv || !mapDiv.data) return;
+			
+			// Create filtered positions using full data range
+			const allFilteredPositions = {};
+			Object.entries(currentFlightData.position_data || {}).forEach(([aircraftLabel, positions]) => {
+				allFilteredPositions[aircraftLabel] = positions.filter(p => 
+					p.latitude && p.longitude && p.latitude !== 0 && p.longitude !== 0
+				);
+			});
+			
+			// Remove existing preview markers (they have names starting with "Preview")
+			const filteredTraces = mapDiv.data.filter(trace => 
+				!trace.name || !trace.name.startsWith('Preview')
+			);
+			
+			// Add new preview marker if enabled and in range
+			if (previewTime !== null && previewTime >= 0 && previewTime <= maxTime) {
+				const previewPositions = interpolatePositionsAtTimeOptimized(allFilteredPositions, previewTime);
+				if (previewPositions.length > 0) {
+					filteredTraces.push({
+						type: 'scattermapbox',
+						lat: previewPositions.map(p => p.lat),
+						lon: previewPositions.map(p => p.lon),
+						mode: 'markers',
+						marker: { 
+							size: 12, 
+							color: 'teal',
+							symbol: 'circle'
+						},
+						name: `Preview (${previewTime.toFixed(1)}s)`,
+						text: previewPositions.map(p => `Preview\n${p.aircraftLabel}\nTime: ${previewTime.toFixed(1)}s`),
+						hoverinfo: 'text',
+						showlegend: false
+					});
+				}
+			}
+			
+			// Update the plot without redrawing (use Plotly.react for efficiency)
+			Plotly.react('mapGraph', filteredTraces, mapDiv.layout);
+		}
+
+		function updateAltitudePreviewMarker() {
+			if (!currentFlightData) return;
+			
+			const previewTime = document.getElementById('previewToggle').checked ? 
+				parseFloat(document.getElementById('markerTimeSlider').value) : null;
+			
+			// Get current altitude graph data
+			const altDiv = document.getElementById('altitudeGraph');
+			if (!altDiv || !altDiv.data) return;
+			
+			// Remove existing preview markers
+			const filteredTraces = altDiv.data.filter(trace => 
+				!trace.name || !trace.name.startsWith('Preview')
+			);
+			
+			// Find max altitude for preview line
+			let maxAltitude = 0;
+			Object.entries(currentFlightData.position_data || {}).forEach(([aircraftLabel, positions]) => {
+				const filteredPositions = positions.filter(p => p.altitude);
+				if (filteredPositions.length > 0) {
+					const altitudes = filteredPositions.map(p => p.altitude);
+					maxAltitude = Math.max(maxAltitude, ...altitudes);
+				}
+			});
+			
+			// Add new preview marker if enabled and in range
+			if (previewTime !== null && previewTime >= 0 && previewTime <= maxTime) {
+				filteredTraces.push({
+					x: [previewTime, previewTime],
+					y: [0, maxAltitude * 1.1],
+					type: 'scatter',
+					mode: 'lines',
+					line: { color: 'teal', dash: 'dot', width: 2 },
+					name: `Preview (${previewTime.toFixed(1)}s)`,
+					showlegend: false
+				});
+			}
+			
+			// Update the plot without redrawing
+			Plotly.react('altitudeGraph', filteredTraces, altDiv.layout);
+		}
+
+		function updateAirspeedPreviewMarker() {
+			if (!currentFlightData) return;
+			
+			const previewTime = document.getElementById('previewToggle').checked ? 
+				parseFloat(document.getElementById('markerTimeSlider').value) : null;
+			
+			// Get current airspeed graph data
+			const airspeedDiv = document.getElementById('airspeedGraph');
+			if (!airspeedDiv || !airspeedDiv.data) return;
+			
+			// Remove existing preview markers
+			const filteredTraces = airspeedDiv.data.filter(trace => 
+				!trace.name || !trace.name.startsWith('Preview')
+			);
+			
+			// Find max airspeed for preview line
+			let maxAirspeed = 0;
+			Object.entries(currentFlightData.position_data || {}).forEach(([aircraftLabel, positions]) => {
+				const filteredPositions = positions.filter(p => p.airspeed);
+				if (filteredPositions.length > 0) {
+					const airspeeds = filteredPositions.map(p => p.airspeed);
+					maxAirspeed = Math.max(maxAirspeed, ...airspeeds);
+				}
+			});
+			
+			// Add new preview marker if enabled and in range
+			if (previewTime !== null && previewTime >= 0 && previewTime <= maxTime) {
+				filteredTraces.push({
+					x: [previewTime, previewTime],
+					y: [0, maxAirspeed * 1.1],
+					type: 'scatter',
+					mode: 'lines',
+					line: { color: 'teal', dash: 'dot', width: 2 },
+					name: `Preview (${previewTime.toFixed(1)}s)`,
+					showlegend: false
+				});
+			}
+			
+			// Update the plot without redrawing
+			Plotly.react('airspeedGraph', filteredTraces, airspeedDiv.layout);
+		}
+
+		function updateAltitudeGraph(startTime, endTime, previewTime) {
+			const traces = [];
+			const flightTitle = currentFlightData.flight ? currentFlightData.flight.title : 'Unknown Flight';
+			let maxAltitude = 0;
+
+			Object.entries(currentFlightData.position_data || {}).forEach(([aircraftLabel, positions]) => {
+				const filteredPositions = positions.filter(p => 
+					p.timestamp_seconds >= startTime && p.timestamp_seconds <= endTime && p.altitude
+				);
+
+				if (filteredPositions.length > 0) {
+					const altitudes = filteredPositions.map(p => p.altitude);
+					maxAltitude = Math.max(maxAltitude, ...altitudes);
+					
+					traces.push({
+						x: filteredPositions.map(p => p.timestamp_seconds),
+						y: altitudes,
+						type: 'scatter',
+						mode: 'lines',
+						name: aircraftLabel
+					});
+				}
+			});
+
+			// Add markers
+			currentMarkers.forEach(marker => {
+				if (marker.time >= startTime && marker.time <= endTime) {
+					let lineColor = 'red';
+					let lineWidth = 1;
+					
+					if (marker.type === 'trim_start') {
+						lineColor = '#28a745'; // Green for trim start
+						lineWidth = 2;
+					} else if (marker.type === 'trim_end') {
+						lineColor = '#dc3545'; // Red for trim end
+						lineWidth = 2;
+					}
+					
+					traces.push({
+						x: [marker.time, marker.time],
+						y: [0, maxAltitude * 1.1],
+						type: 'scatter',
+						mode: 'lines',
+						line: { color: lineColor, dash: 'dash', width: lineWidth },
+						name: marker.label,
+						showlegend: false
+					});
+				}
+			});
+
+			// Add preview marker
+			if (previewTime !== null && previewTime >= startTime && previewTime <= endTime) {
+				traces.push({
+					x: [previewTime, previewTime],
+					y: [0, maxAltitude * 1.1],
+					type: 'scatter',
+					mode: 'lines',
+					line: { color: 'teal', dash: 'dot', width: 1 },
+					name: `Preview (${previewTime.toFixed(1)}s)`,
+					showlegend: false
+				});
+			}
+
+			const layout = {
+				title: `Altitude for ${flightTitle}`,
+				xaxis: { title: 'Time (seconds)' },
+				yaxis: { title: 'Altitude (meters)' },
+				height: 400
+			};
+
+			Plotly.newPlot('altitudeGraph', traces, layout);
+		}
+
+		function updateMapGraph(startTime, endTime, previewTime) {
+			const traces = [];
+			const flightTitle = currentFlightData.flight ? currentFlightData.flight.title : 'Unknown Flight';
+			let bounds = { minLat: 90, maxLat: -90, minLon: 180, maxLon: -180 };
+			let hasValidData = false;
+			let allFilteredPositions = {}; // Store for marker interpolation
+
+			Object.entries(currentFlightData.position_data || {}).forEach(([aircraftLabel, positions]) => {
+				const filteredPositions = positions.filter(p => 
+					p.timestamp_seconds >= startTime && p.timestamp_seconds <= endTime && 
+					p.latitude && p.longitude && p.latitude !== 0 && p.longitude !== 0
+				);
+
+				allFilteredPositions[aircraftLabel] = filteredPositions;
+
+				if (filteredPositions.length > 0) {
+					hasValidData = true;
+					
+					// Update bounds
+					filteredPositions.forEach(p => {
+						bounds.minLat = Math.min(bounds.minLat, p.latitude);
+						bounds.maxLat = Math.max(bounds.maxLat, p.latitude);
+						bounds.minLon = Math.min(bounds.minLon, p.longitude);
+						bounds.maxLon = Math.max(bounds.maxLon, p.longitude);
+					});
+
+					// Flight path
+					traces.push({
+						type: 'scattermapbox',
+						lat: filteredPositions.map(p => p.latitude),
+						lon: filteredPositions.map(p => p.longitude),
+						mode: 'lines',
+						name: aircraftLabel,
+						line: { width: 2 }
+					});
+
+					// Start and end points
+					traces.push({
+						type: 'scattermapbox',
+						lat: [filteredPositions[0].latitude],
+						lon: [filteredPositions[0].longitude],
+						mode: 'markers',
+						marker: { size: 10, color: 'green' },
+						name: 'Start',
+						showlegend: false
+					});
+
+					traces.push({
+						type: 'scattermapbox',
+						lat: [filteredPositions[filteredPositions.length - 1].latitude],
+						lon: [filteredPositions[filteredPositions.length - 1].longitude],
+						mode: 'markers',
+						marker: { size: 10, color: 'red' },
+						name: 'End',
+						showlegend: false
+					});
+				}
+			});
+
+			// Add markers to the map
+			currentMarkers.forEach((marker, index) => {
+				if (marker.time >= startTime && marker.time <= endTime) {
+					const markerPositions = interpolatePositionsAtTime(allFilteredPositions, marker.time);
+
+					if (markerPositions.length > 0) {
+						// Create a separate trace for each aircraft position to avoid clustering issues
+						markerPositions.forEach((pos, posIndex) => {
+							traces.push({
+								type: 'scattermapbox',
+								lat: [pos.lat],
+								lon: [pos.lon],
+								mode: 'markers',
+								marker: { 
+									size: 15, 
+									color: 'red',
+									symbol: 'circle',
+									line: { color: 'darkred', width: 2 }
+								},
+								name: `${marker.label}_${index}_${posIndex}`, // Unique name
+								text: [`${marker.label}\n${pos.aircraftLabel}\nTime: ${marker.time.toFixed(1)}s`],
+								hoverinfo: 'text',
+								showlegend: false
+							});
+						});
+					}
+				}
+			});
+
+			// Add preview marker to the map
+			if (previewTime !== null && previewTime >= startTime && previewTime <= endTime) {
+				const previewPositions = interpolatePositionsAtTime(allFilteredPositions, previewTime);
+				if (previewPositions.length > 0) {
+					traces.push({
+						type: 'scattermapbox',
+						lat: previewPositions.map(p => p.lat),
+						lon: previewPositions.map(p => p.lon),
+						mode: 'markers',
+						marker: { 
+							size: 12, 
+							color: 'teal',
+							symbol: 'circle'
+						},
+						name: `Preview (${previewTime.toFixed(1)}s)`,
+						text: previewPositions.map(p => `Preview\n${p.aircraftLabel}\nTime: ${previewTime.toFixed(1)}s`),
+						hoverinfo: 'text',
+						showlegend: false
+					});
+				}
+			}
+
+			let center = { lat: 0, lon: 0 };
+			let zoom = 1;
+
+			if (hasValidData) {
+				center = {
+					lat: (bounds.minLat + bounds.maxLat) / 2,
+					lon: (bounds.minLon + bounds.maxLon) / 2
+				};
+				
+				const latRange = bounds.maxLat - bounds.minLat;
+				const lonRange = bounds.maxLon - bounds.minLon;
+				const maxRange = Math.max(latRange, lonRange);
+				
+				if (maxRange < 0.01) zoom = 15;
+				else if (maxRange < 0.05) zoom = 12;
+				else if (maxRange < 0.1) zoom = 10;
+				else if (maxRange < 0.5) zoom = 8;
+				else if (maxRange < 1) zoom = 7;
+				else if (maxRange < 5) zoom = 5;
+				else zoom = 4;
+			}
+
+			const layout = {
+				title: `GPS Track for ${flightTitle}`,
+				mapbox: {
+					style: 'open-street-map',
+					center: center,
+					zoom: zoom
+				},
+				margin: { l: 0, r: 0, t: 40, b: 0 },
+				height: 600,
+				width: null, // Use container width
+				autosize: true
+			};
+
+			Plotly.newPlot('mapGraph', traces, layout, {responsive: true});
+			
+			// Ensure map resizes properly
+			setTimeout(() => {
+				Plotly.Plots.resize('mapGraph');
+			}, 100);
+		}
+
+		function updateAirspeedGraph(startTime, endTime, previewTime) {
+			const traces = [];
+			const flightTitle = currentFlightData.flight ? currentFlightData.flight.title : 'Unknown Flight';
+			let maxAirspeed = 0;
+
+			Object.entries(currentFlightData.position_data || {}).forEach(([aircraftLabel, positions]) => {
+				const filteredPositions = positions.filter(p => 
+					p.timestamp_seconds >= startTime && p.timestamp_seconds <= endTime && p.airspeed
+				);
+
+				if (filteredPositions.length > 0) {
+					const airspeeds = filteredPositions.map(p => p.airspeed);
+					maxAirspeed = Math.max(maxAirspeed, ...airspeeds);
+					
+					traces.push({
+						x: filteredPositions.map(p => p.timestamp_seconds),
+						y: airspeeds,
+						type: 'scatter',
+						mode: 'lines',
+						name: aircraftLabel
+					});
+				}
+			});
+
+			// Add markers
+			currentMarkers.forEach(marker => {
+				if (marker.time >= startTime && marker.time <= endTime) {
+					let lineColor = 'red';
+					let lineWidth = 1;
+					
+					if (marker.type === 'trim_start') {
+						lineColor = '#28a745'; // Green for trim start
+						lineWidth = 2;
+					} else if (marker.type === 'trim_end') {
+						lineColor = '#dc3545'; // Red for trim end
+						lineWidth = 2;
+					}
+					
+					traces.push({
+						x: [marker.time, marker.time],
+						y: [0, maxAirspeed * 1.1],
+						type: 'scatter',
+						mode: 'lines',
+						line: { color: lineColor, dash: 'dash', width: lineWidth },
+						name: marker.label,
+						showlegend: false
+					});
+				}
+			});
+
+			// Add preview marker
+			if (previewTime !== null && previewTime >= startTime && previewTime <= endTime) {
+				traces.push({
+					x: [previewTime, previewTime],
+					y: [0, maxAirspeed * 1.1],
+					type: 'scatter',
+					mode: 'lines',
+					line: { color: 'teal', dash: 'dot', width: 1 },
+					name: `Preview (${previewTime.toFixed(1)}s)`,
+					showlegend: false
+				});
+			}
+
+			const layout = {
+				title: `Airspeed for ${flightTitle}`,
+				xaxis: { title: 'Time (seconds)' },
+				yaxis: { title: 'Airspeed (m/s)' },
+				height: 400
+			};
+
+			Plotly.newPlot('airspeedGraph', traces, layout);
+		}
+
+		function showTab(tabName) {
+			// Hide all tabs
+			document.querySelectorAll('.tab-content').forEach(tab => {
+				tab.classList.remove('active');
+			});
+			
+			document.querySelectorAll('.tab').forEach(tab => {
+				tab.classList.remove('active');
+			});
+			
+			// Show selected tab
+			document.getElementById(tabName + '-tab').classList.add('active');
+			event.target.classList.add('active');
+			
+			// Resize map when map tab is shown
+			if (tabName === 'map') {
+				setTimeout(() => {
+					Plotly.Plots.resize('mapGraph');
+				}, 100);
+			}
+		}
+
+		function interpolatePositionsAtTimeOptimized(allFilteredPositions, targetTime) {
+			const positions = [];
+			
+			Object.entries(allFilteredPositions).forEach(([aircraftLabel, aircraftPositions]) => {
+				if (aircraftPositions.length === 0) return;
+				
+				// Binary search for more efficient index finding
+				let beforeIdx = -1;
+				let afterIdx = -1;
+				
+				// Use binary search for better performance on large datasets
+				let left = 0;
+				let right = aircraftPositions.length - 1;
+				
+				while (left <= right) {
+					const mid = Math.floor((left + right) / 2);
+					const midTime = aircraftPositions[mid].timestamp_seconds;
+					
+					if (midTime <= targetTime) {
+						beforeIdx = mid;
+						left = mid + 1;
+					} else {
+						afterIdx = mid;
+						right = mid - 1;
+					}
+				}
+				
+				let position = null;
+				
+				if (beforeIdx === -1 && afterIdx === -1) {
+					return;
+				} else if (beforeIdx === -1) {
+					position = aircraftPositions[afterIdx];
+				} else if (afterIdx === -1) {
+					position = aircraftPositions[beforeIdx];
+				} else {
+					// Interpolate
+					const before = aircraftPositions[beforeIdx];
+					const after = aircraftPositions[afterIdx];
+					
+					const timeDiff = after.timestamp_seconds - before.timestamp_seconds;
+					if (timeDiff === 0) {
+						position = before;
+					} else {
+						const ratio = (targetTime - before.timestamp_seconds) / timeDiff;
+						position = {
+							latitude: before.latitude + (after.latitude - before.latitude) * ratio,
+							longitude: before.longitude + (after.longitude - before.longitude) * ratio,
+							timestamp_seconds: targetTime
+						};
+					}
+				}
+				
+				if (position && position.latitude && position.longitude && 
+					position.latitude !== 0 && position.longitude !== 0) {
+					positions.push({
+						lat: position.latitude,
+						lon: position.longitude,
+						aircraftLabel: aircraftLabel
+					});
+				}
+			});
+			
+			return positions;
+		}
+
+		function interpolatePositionsAtTime(allFilteredPositions, targetTime) {
+			const positions = [];
+			
+			Object.entries(allFilteredPositions).forEach(([aircraftLabel, aircraftPositions]) => {
+				if (aircraftPositions.length === 0) return;
+				
+				// Find the position at the target time using interpolation
+				let position = null;
+				
+				// Find the closest positions before and after the target time
+				let beforeIdx = -1;
+				let afterIdx = -1;
+				
+				for (let i = 0; i < aircraftPositions.length; i++) {
+					if (aircraftPositions[i].timestamp_seconds <= targetTime) {
+						beforeIdx = i;
+					} else {
+						afterIdx = i;
+						break;
+					}
+				}
+				
+				if (beforeIdx === -1 && afterIdx === -1) {
+					// No valid positions
+					return;
+				} else if (beforeIdx === -1) {
+					// Use first position
+					position = aircraftPositions[afterIdx];
+				} else if (afterIdx === -1) {
+					// Use last position
+					position = aircraftPositions[beforeIdx];
+				} else {
+					// Interpolate between before and after positions
+					const before = aircraftPositions[beforeIdx];
+					const after = aircraftPositions[afterIdx];
+					
+					const timeDiff = after.timestamp_seconds - before.timestamp_seconds;
+					if (timeDiff === 0) {
+						position = before;
+					} else {
+						const ratio = (targetTime - before.timestamp_seconds) / timeDiff;
+						
+						position = {
+							latitude: before.latitude + (after.latitude - before.latitude) * ratio,
+							longitude: before.longitude + (after.longitude - before.longitude) * ratio,
+							timestamp_seconds: targetTime
+						};
+					}
+				}
+				
+				if (position && position.latitude && position.longitude && 
+					position.latitude !== 0 && position.longitude !== 0) {
+					positions.push({
+						lat: position.latitude,
+						lon: position.longitude,
+						aircraftLabel: aircraftLabel
+					});
+				}
+			});
+			
+			return positions;
+		}
+
+		function createDistanceMarkers() {
+			if (!currentFlightId) {
+				showStatus('flightStatus', 'No flight selected', 'error');
+				return;
+			}
+
+			const button = document.getElementById('createDistanceMarkersButton');
+			button.disabled = true;
+			button.textContent = 'Creating Markers...';
+
+			showStatus('flightStatus', 'Creating distance markers for 9nm from Currock Hill...', 'info');
+
+			fetch(`/data-analysis/distance-markers?flightId=${currentFlightId}`, {
+				method: 'POST'
+			})
+			.then(response => response.json())
+			.then(data => {
+				if (data.status === 'success') {
+					showStatus('flightStatus', data.message, 'success');
+					// Reload markers to show the new distance markers
+					loadMarkers();
+				} else {
+					showStatus('flightStatus', data.message || 'Failed to create distance markers', 'error');
+				}
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Failed to create distance markers: ' + error.message, 'error');
+			})
+			.finally(() => {
+				button.disabled = false;
+				button.textContent = 'Create 9nm Distance Markers';
+			});
+		}
+
+		function loadMarkers() {
+			if (!currentFlightId) return;
+
+			fetch(`/data-analysis/markers?flightId=${currentFlightId}`)
+			.then(response => response.json())
+			.then(markers => {
+				currentMarkers = markers || [];
+				// Update marker ID counter to avoid conflicts
+				markerIdCounter = Math.max(0, ...currentMarkers.map(m => m.id || 0)) + 1;
+				updateMarkersTable();
+				updateVisualization();
+				// Load trim markers and sync with trim sliders
+				loadTrimMarkers();
+			})
+			.catch(error => {
+				console.error('Failed to load markers:', error);
+			});
+		}
+
+		function setTrimStart() {
+			const time = parseFloat(document.getElementById('markerTimeSlider').value);
+			createTrimMarker('trim_start', time, 'Trim Start');
+		}
+
+		function setTrimEnd() {
+			const time = parseFloat(document.getElementById('markerTimeSlider').value);
+			createTrimMarker('trim_end', time, 'Trim End');
+		}
+
+		function createTrimMarker(type, time, label) {
+			if (!currentFlightId) {
+				showStatus('flightStatus', 'No flight selected', 'error');
+				return;
+			}
+
+			fetch('/data-analysis/trim-markers', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					flight_id: currentFlightId,
+					type: type,
+					time: time,
+					label: label
+				})
+			})
+			.then(response => response.json())
+			.then(data => {
+				if (data.id) {
+					// Successfully created/updated trim marker
+					loadMarkers();
+					// Update trim sliders based on trim markers
+					updateTrimSlidersFromMarkers();
+					showStatus('flightStatus', `${label} set at ${time.toFixed(1)}s`, 'success');
+				} else {
+					showStatus('flightStatus', data.message || 'Failed to create trim marker', 'error');
+				}
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Failed to create trim marker: ' + error.message, 'error');
+			});
+		}
+
+		function loadTrimMarkers() {
+			if (!currentFlightId) return;
+
+			fetch(`/data-analysis/trim-markers?flightId=${currentFlightId}`)
+			.then(response => response.json())
+			.then(data => {
+				// Update trim sliders based on loaded trim markers
+				if (data.trim_start) {
+					document.getElementById('trimRangeStart').value = data.trim_start.time;
+				}
+				if (data.trim_end) {
+					document.getElementById('trimRangeEnd').value = data.trim_end.time;
+				}
+				// Update trim range display
+				updateTrimRange();
+			})
+			.catch(error => {
+				console.error('Failed to load trim markers:', error);
+			});
+		}
+
+		function updateTrimSlidersFromMarkers() {
+			// Find trim markers in current markers
+			const trimStart = currentMarkers.find(m => m.type === 'trim_start');
+			const trimEnd = currentMarkers.find(m => m.type === 'trim_end');
+
+			if (trimStart) {
+				document.getElementById('trimRangeStart').value = trimStart.time;
+			}
+			if (trimEnd) {
+				document.getElementById('trimRangeEnd').value = trimEnd.time;
+			}
+
+			// Update trim range display
+			updateTrimRange();
+		}
+
+		function duplicateFlight() {
+			const flightId = document.getElementById('flightDropdown').value;
+			const newTitle = document.getElementById('duplicateFlightTitle').value.trim();
+			
+			if (!flightId) {
+				showStatus('flightStatus', 'No flight selected', 'error');
+				return;
+			}
+			
+			if (!newTitle) {
+				showStatus('flightStatus', 'Please enter a name for the duplicate flight', 'error');
+				return;
+			}
+
+			const button = document.getElementById('duplicateFlightButton');
+			const input = document.getElementById('duplicateFlightTitle');
+			button.disabled = true;
+			input.disabled = true;
+			button.textContent = 'Duplicating...';
+
+			showStatus('flightStatus', 'Duplicating flight...', 'info');
+
+			fetch('/data-analysis/duplicate-flight', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					flight_id: parseInt(flightId),
+					new_title: newTitle
+				})
+			})
+			.then(response => response.json())
+			.then(data => {
+				if (data.status === 'success') {
+					showStatus('flightStatus', data.message, 'success');
+					// Reload flights to show the new duplicate
+					loadFlights();
+					// Clear the input field
+					input.value = '';
+				} else {
+					showStatus('flightStatus', data.message || 'Failed to duplicate flight', 'error');
+				}
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Failed to duplicate flight: ' + error.message, 'error');
+			})
+			.finally(() => {
+				button.disabled = false;
+				input.disabled = false;
+				button.textContent = 'Duplicate Flight';
+			});
+		}
+
+		function deleteFlight() {
+			const flightId = document.getElementById('flightDropdown').value;
+			
+			if (!flightId) {
+				showStatus('flightStatus', 'No flight selected', 'error');
+				return;
+			}
+
+			// Get flight title for confirmation dialog
+			const selectedOption = document.getElementById('flightDropdown').options[document.getElementById('flightDropdown').selectedIndex];
+			const flightTitle = selectedOption.textContent.split(': ')[1]?.split(' (')[0] || 'Unknown Flight';
+
+			// Show confirmation dialog
+			const confirmed = confirm(`Are you sure you want to delete the flight "${flightTitle}"?\n\nThis action cannot be undone and will permanently remove all flight data, markers, and related information.`);
+			
+			if (!confirmed) {
+				return;
+			}
+
+			const button = document.getElementById('deleteFlightButton');
+			button.disabled = true;
+			button.textContent = 'Deleting...';
+
+			showStatus('flightStatus', 'Deleting flight...', 'info');
+
+			fetch(`/data-analysis/delete-flight?id=${flightId}`, {
+				method: 'DELETE'
+			})
+			.then(response => response.json())
+			.then(data => {
+				if (data.status === 'success') {
+					showStatus('flightStatus', data.message, 'success');
+					// Reload flights to refresh the list
+					loadFlights();
+					// Clear current flight data and hide sections
+					currentFlightData = null;
+					currentFlightId = null;
+					currentMarkers = [];
+					document.getElementById('controlsSection').style.display = 'none';
+					document.getElementById('statisticsSection').style.display = 'none';
+					document.getElementById('visualizationSection').style.display = 'none';
+				} else {
+					showStatus('flightStatus', data.message || 'Failed to delete flight', 'error');
+				}
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Failed to delete flight: ' + error.message, 'error');
+			})
+			.finally(() => {
+				button.disabled = false;
+				button.textContent = 'Delete Flight';
+			});
+		}
+
+		function createTrimmedFlightFromMarkers() {
+			const flightId = document.getElementById('flightDropdown').value;
+			const newTitle = document.getElementById('trimmedFlightTitle').value.trim();
+			
+			if (!flightId) {
+				showStatus('flightStatus', 'No flight selected', 'error');
+				return;
+			}
+			
+			if (!newTitle) {
+				showStatus('flightStatus', 'Please enter a name for the trimmed flight', 'error');
+				return;
+			}
+			
+			// Find trim start and end markers
+			const trimStartMarker = currentMarkers.find(m => m.type === 'trim_start');
+			const trimEndMarker = currentMarkers.find(m => m.type === 'trim_end');
+			
+			if (!trimStartMarker || !trimEndMarker) {
+				showStatus('flightStatus', 'Both trim start and trim end markers are required', 'error');
+				return;
+			}
+			
+			if (trimEndMarker.time - trimStartMarker.time < 1) {
+				showStatus('flightStatus', 'Trim range too small (minimum 1 second)', 'error');
+				return;
+			}
+			
+			const button = document.getElementById('createTrimmedFlightButton');
+			const input = document.getElementById('trimmedFlightTitle');
+			button.disabled = true;
+			input.disabled = true;
+			button.textContent = 'Creating...';
+			
+			showStatus('flightStatus', 'Creating trimmed flight...', 'info');
+			
+			fetch('/data-analysis/trim-flight', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					flight_id: parseInt(flightId),
+					new_title: newTitle,
+					start_time: trimStartMarker.time,
+					end_time: trimEndMarker.time
+				})
+			})
+			.then(response => response.json())
+			.then(data => {
+				if (data.status === 'success') {
+					showStatus('flightStatus', data.message, 'success');
+					// Reload flights to show the new trimmed flight
+					loadFlights();
+					// Clear the input field
+					input.value = '';
+				} else {
+					showStatus('flightStatus', data.message || 'Failed to create trimmed flight', 'error');
+				}
+			})
+			.catch(error => {
+				showStatus('flightStatus', 'Failed to create trimmed flight: ' + error.message, 'error');
+			})
+			.finally(() => {
+				button.disabled = false;
+				input.disabled = false;
+				button.textContent = 'Create Trimmed Flight';
+			});
+		}
+
+		function showStatus(elementId, message, type) {
+			const element = document.getElementById(elementId);
+			element.innerHTML = `<div class="status ${type}">${message}</div>`;
+		}
+
+		function exportFlightData(format) {
+			const flightId = document.getElementById('flightDropdown').value;
+			if (!flightId) {
+				showStatus('flightStatus', 'Please select a flight first', 'error');
+				return;
+			}
+
+			// Show export in progress
+			const buttonId = format === 'airspeed-altitude' ? 'exportAirspeedAltitudeButton' : 'exportFullDataButton';
+			const button = document.getElementById(buttonId);
+			const originalText = button.textContent;
+			button.disabled = true;
+			button.textContent = 'Exporting...';
+
+			// Create download URL
+			const url = `/data-analysis/export-csv?flightId=${flightId}&format=${format}`;
+			
+			// Create a temporary link and trigger download
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = ''; // Let the server set the filename via Content-Disposition
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+
+			// Reset button state
+			setTimeout(() => {
+				button.disabled = false;
+				button.textContent = originalText;
+				showStatus('flightStatus', `CSV export started for ${format === 'airspeed-altitude' ? 'Airspeed & Altitude' : 'Full Flight Data'}`, 'success');
+			}, 1000);
+		}
+
+		function loadStatistics(flightId) {
+			fetch(`/data-analysis/statistics?flightId=${flightId}`)
+			.then(response => response.json())
+			.then(statistics => {
+				displayStatistics(statistics);
+			})
+			.catch(error => {
+				console.error('Failed to load statistics:', error);
+				document.getElementById('statisticsContent').innerHTML = '<p class="error">Failed to load statistics.</p>';
+			});
+		}
+
+		function displayStatistics(statistics) {
+			const container = document.getElementById('statisticsContent');
+			
+			if (!statistics || Object.keys(statistics).length === 0) {
+				container.innerHTML = '<p>No statistics available for this flight.</p>';
+				return;
+			}
+
+			let html = '<div class="statistics-container">';
+
+			for (const [aircraftLabel, stats] of Object.entries(statistics)) {
+				html += `<div class="aircraft-stats">
+					<h4>${aircraftLabel}</h4>`;
+
+				// Airspeed Statistics
+				if (stats.airspeed_stats) {
+					html += `<h5>Airspeed (knots)</h5>
+					<table class="stats-table">
+						<tr><td class="metric-name">Count</td><td class="metric-value">${stats.airspeed_stats.count}</td></tr>
+						<tr><td class="metric-name">Mean</td><td class="metric-value">${stats.airspeed_stats.mean.toFixed(2)}</td></tr>
+						<tr class="variance-highlight"><td class="metric-name">Variance</td><td class="metric-value">${stats.airspeed_stats.variance.toFixed(4)}</td></tr>
+						<tr><td class="metric-name">Std Deviation</td><td class="metric-value">${stats.airspeed_stats.std_dev.toFixed(2)}</td></tr>
+						<tr><td class="metric-name">Min</td><td class="metric-value">${stats.airspeed_stats.min.toFixed(2)}</td></tr>
+						<tr><td class="metric-name">Max</td><td class="metric-value">${stats.airspeed_stats.max.toFixed(2)}</td></tr>
+						<tr><td class="metric-name">Range</td><td class="metric-value">${stats.airspeed_stats.range.toFixed(2)}</td></tr>
+						<tr><td class="metric-name">Median</td><td class="metric-value">${stats.airspeed_stats.median.toFixed(2)}</td></tr>
+					</table><br>`;
+				}
+
+				// Indicated Altitude Statistics
+				if (stats.indicated_altitude_stats) {
+					html += `<h5>Indicated Altitude (feet)</h5>
+					<table class="stats-table">
+						<tr><td class="metric-name">Count</td><td class="metric-value">${stats.indicated_altitude_stats.count}</td></tr>
+						<tr><td class="metric-name">Mean</td><td class="metric-value">${stats.indicated_altitude_stats.mean.toFixed(0)}</td></tr>
+						<tr class="variance-highlight"><td class="metric-name">Variance</td><td class="metric-value">${stats.indicated_altitude_stats.variance.toFixed(2)}</td></tr>
+						<tr><td class="metric-name">Std Deviation</td><td class="metric-value">${stats.indicated_altitude_stats.std_dev.toFixed(2)}</td></tr>
+						<tr><td class="metric-name">Min</td><td class="metric-value">${stats.indicated_altitude_stats.min.toFixed(0)}</td></tr>
+						<tr><td class="metric-name">Max</td><td class="metric-value">${stats.indicated_altitude_stats.max.toFixed(0)}</td></tr>
+						<tr><td class="metric-name">Range</td><td class="metric-value">${stats.indicated_altitude_stats.range.toFixed(0)}</td></tr>
+						<tr><td class="metric-name">Median</td><td class="metric-value">${stats.indicated_altitude_stats.median.toFixed(0)}</td></tr>
+					</table><br>`;
+				}
+
+				// MSL Altitude Statistics
+				if (stats.altitude_stats) {
+					html += `<h5>MSL Altitude (feet)</h5>
+					<table class="stats-table">
+						<tr><td class="metric-name">Count</td><td class="metric-value">${stats.altitude_stats.count}</td></tr>
+						<tr><td class="metric-name">Mean</td><td class="metric-value">${stats.altitude_stats.mean.toFixed(0)}</td></tr>
+						<tr class="variance-highlight"><td class="metric-name">Variance</td><td class="metric-value">${stats.altitude_stats.variance.toFixed(2)}</td></tr>
+						<tr><td class="metric-name">Std Deviation</td><td class="metric-value">${stats.altitude_stats.std_dev.toFixed(2)}</td></tr>
+						<tr><td class="metric-name">Min</td><td class="metric-value">${stats.altitude_stats.min.toFixed(0)}</td></tr>
+						<tr><td class="metric-name">Max</td><td class="metric-value">${stats.altitude_stats.max.toFixed(0)}</td></tr>
+						<tr><td class="metric-name">Range</td><td class="metric-value">${stats.altitude_stats.range.toFixed(0)}</td></tr>
+						<tr><td class="metric-name">Median</td><td class="metric-value">${stats.altitude_stats.median.toFixed(0)}</td></tr>
+					</table>`;
+				}
+
+				html += '</div>';
+			}
+
+			html += '</div>';
+			container.innerHTML = html;
+		}
+
+		function toggleAccordion(accordionId) {
+			const content = document.getElementById(accordionId);
+			const icon = document.getElementById(accordionId + 'Icon');
+			
+			if (content.classList.contains('open')) {
+				content.classList.remove('open');
+				icon.classList.remove('rotated');
+				icon.textContent = '▼';
+			} else {
+				content.classList.add('open');
+				icon.classList.add('rotated');
+				icon.textContent = '▲';
+			}
+		}
+	</script>
+}
